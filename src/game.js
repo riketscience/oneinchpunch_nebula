@@ -29,6 +29,14 @@ export function createGame(canvas) {
     alive: true,
   };
 
+// Background image
+const bgImage = new Image();
+// NOTE: adjust extension if your file is e.g. .jpg instead of .png
+bgImage.src = '/images/backg_main.jpg';
+let bgReady = false;
+bgImage.onload = () => { bgReady = true; };
+
+
   let bodies = []; // {x,y,vx,vy,radius,type,gravMult,attractMul,speedMul}
   let spawnTimer = 0;
 
@@ -40,11 +48,13 @@ export function createGame(canvas) {
   let levelIndex = 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
 
-  // Phase: 'playing' | 'captured' | 'levelComplete'
+  // Phase: 'playing' | 'captured' | 'betweenLevels'
   let phase = 'playing';
   let captureTimer = 0.0; // 2.5s
-  let levelAcceptAwaitRelease = false;
-  const acceptBtn = { x: 0, y: 0, w: 220, h: 48 };
+  let betweenTimer = 0.0;
+  let betweenStage = 0; // 0: level complete, 1: get ready, 2: countdown
+  let betweenFromLevel = 1;
+  let betweenToLevel = 2;
 
   // Energy & respawn/invulnerability
   let energy = 1.0;
@@ -52,6 +62,7 @@ export function createGame(canvas) {
   let respawnPending = false;
   let respawnCheckTimer = 0.0;
   let invulnTimer = 0.0;
+  let respawnCooldown = 0.0; // minimum time before attempting respawn
 
   function reset() {
     scoreGoal = levels[levelIndex].scoreGoal;
@@ -209,6 +220,7 @@ export function createGame(canvas) {
       fragments.push({ x: ship.x, y: ship.y, vx: Math.cos(a)*speed + ship.vx*0.3, vy: Math.sin(a)*speed + ship.vy*0.3, angle: a, life: 0.8 });
     }
     respawnPending = true;
+    respawnCooldown = 1.2;   // wait at least 1.2s before attempting respawn
     respawnCheckTimer = 0.1;
   }
   function updateFragments(dt) {
@@ -236,8 +248,9 @@ export function createGame(canvas) {
   }
   function isCenterSafe() {
     const cx = W() * 0.5, cy = H() * 0.5;
+    const extraPad = 8; // extra safety margin
     for (const b of bodies) {
-      const minDist = SHIP_RADIUS + b.radius;
+      const minDist = SHIP_RADIUS + b.radius + extraPad;
       const dx = cx - b.x, dy = cy - b.y;
       if (dx*dx + dy*dy <= minDist * minDist) return false;
     }
@@ -245,6 +258,8 @@ export function createGame(canvas) {
   }
   function tryRespawn(dt) {
     if (!respawnPending) return;
+    // Wait minimum cooldown before attempting safe respawn
+    if (respawnCooldown > 0) { respawnCooldown -= dt; return; }
     respawnCheckTimer -= dt;
     if (respawnCheckTimer <= 0) {
       if (isCenterSafe()) {
@@ -273,9 +288,13 @@ export function createGame(canvas) {
           ship.score += 10;
           bodies.splice(i, 1);
         } else {
+          // Enemy hit: remove enemy immediately and apply damage once
+          bodies.splice(i, 1);
           energy = Math.max(0, energy - 0.10);
-          ship.vx *= -0.5; ship.vy *= -0.5;
+          // mild knockback for feedback
+          ship.vx *= -0.4; ship.vy *= -0.4;
           if (energy <= 0 && ship.alive) triggerExplosion();
+          break; // ensure only one enemy hit is processed this frame
         }
       }
     }
@@ -356,22 +375,13 @@ export function createGame(canvas) {
   }
 
   function onPress(px, py) {
-    if (phase === 'levelComplete') {
-      if (levelAcceptAwaitRelease) return;
-      if (px != null && py != null) {
-        const x = px, y = py;
-        if (x >= acceptBtn.x && x <= acceptBtn.x + acceptBtn.w && y >= acceptBtn.y && y <= acceptBtn.y + acceptBtn.h) {
-          startNextLevel();
-        }
-      }
-      return;
-    }
+    if (phase !== 'playing') return;
     if (!ship.alive) return;
     ship.state = "thrusting";
     ship.thrustDir = ship.angle;
   }
   function onRelease(px, py) {
-    if (phase === 'levelComplete') { levelAcceptAwaitRelease = false; }
+    if (phase !== 'playing') return;
     if (!ship.alive) return;
     ship.state = "rotating";
   }
@@ -380,17 +390,22 @@ export function createGame(canvas) {
   let deadTimer = 0.8;
 
   function update(dt) {
+
     if (phase === 'captured') {
-      if (wormhole) {
+            if (wormhole) {
         const dx = wormhole.x - ship.x, dy = wormhole.y - ship.y;
         ship.vx = dx * 3.0; ship.vy = dy * 3.0;
         ship.x += ship.vx * dt; ship.y += ship.vy * dt;
       }
+      // Spin up rotation on capture (same across levels)
       ship.angularVel = (TWO_PI / ROT_PERIOD) * 2.2;
       captureTimer -= dt;
       if (captureTimer <= 0) {
-        phase = 'levelComplete';
-        levelAcceptAwaitRelease = true;
+        phase = 'betweenLevels';
+        betweenTimer = 0.0;
+        betweenStage = 0;
+        betweenFromLevel = levelIndex + 1;
+        betweenToLevel = Math.min(levelIndex + 2, levels.length);
       }
       updateFragments(dt);
       return;
@@ -403,13 +418,27 @@ export function createGame(canvas) {
       return;
     }
 
-    if (phase === 'levelComplete') {
+    if (phase === 'betweenLevels') {
+      // Level transition flow: Level N complete -> Level M get ready -> 3..2..1
+      betweenTimer += dt;
+      if (betweenStage === 0 && betweenTimer >= 1.5) {
+        betweenStage = 1;
+        betweenTimer = 0.0;
+      } else if (betweenStage === 1 && betweenTimer >= 1.5) {
+        betweenStage = 2;
+        betweenTimer = 0.0;
+      } else if (betweenStage === 2 && betweenTimer >= 3.0) {
+        // After countdown, start next level
+        startNextLevel();
+        return;
+      }
       updateFragments(dt);
       return;
     }
 
     spawnTimer += dt;
     if (spawnTimer >= SPAWN_INTERVAL) { spawnTimer = 0; spawnBody(); }
+
     integrate(dt);
     handleBodyMerges();
     invulnTimer = Math.max(0, invulnTimer - dt);
@@ -423,8 +452,15 @@ export function createGame(canvas) {
   }
 
   function render(ctx) {
-    const w = W(), h = H();
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+const w = W(), h = H();
+ctx.fillStyle = '#000';
+ctx.fillRect(0, 0, w, h);
+if (bgReady) {
+  ctx.save();
+  ctx.globalAlpha = 0.5; // darken ~50%
+  ctx.drawImage(bgImage, 0, 0, w, h);
+  ctx.restore();
+}
 
     renderWormhole(ctx);
 
@@ -495,25 +531,34 @@ export function createGame(canvas) {
       ctx.fillText('🪙 Score', x, y - 2);
     }
 
-    // Overlay
-    if (phase === 'levelComplete') {
+    // Overlay: between-level messages + countdown
+    if (phase === 'betweenLevels') {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
-      ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Level Complete', w * 0.5, h * 0.45);
-      ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText(levelAcceptAwaitRelease ? 'Release, then press Accept' : 'Press Accept to continue', w * 0.5, h * 0.52);
-      acceptBtn.w = 220; acceptBtn.h = 48;
-      acceptBtn.x = w * 0.5 - acceptBtn.w / 2;
-      acceptBtn.y = h * 0.6;
-      ctx.fillStyle = '#1f8efa';
-      ctx.fillRect(acceptBtn.x, acceptBtn.y, acceptBtn.w, acceptBtn.h);
-      ctx.strokeStyle = '#cfe8ff'; ctx.lineWidth = 2; ctx.strokeRect(acceptBtn.x, acceptBtn.y, acceptBtn.w, acceptBtn.h);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Accept', w * 0.5, acceptBtn.y + acceptBtn.h / 2 + 6);
+
+      if (betweenStage === 0) {
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.45);
+      } else if (betweenStage === 1) {
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(`Level ${betweenToLevel} get ready`, w * 0.5, h * 0.45);
+      } else if (betweenStage === 2) {
+        const total = 3.0;
+        const t = Math.max(0, Math.min(total, betweenTimer));
+        const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
+        const text = String(remaining);
+        const pulse = 1.0 + 0.25 * (1 - (t % 1.0)); // simple scale pulse
+        ctx.save();
+        ctx.translate(w * 0.5, h * 0.5);
+        ctx.scale(pulse, pulse);
+        ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(text, 0, 20);
+        ctx.restore();
+      }
+
       ctx.restore();
     }
 
