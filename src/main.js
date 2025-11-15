@@ -1,9 +1,6 @@
-import { createGame } from './game.js';
-
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
 
-// Handle high-DPI rendering
 function resizeCanvas() {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const cssWidth = Math.max(1, Math.floor(window.innerWidth));
@@ -12,37 +9,34 @@ function resizeCanvas() {
   canvas.style.height = cssHeight + 'px';
   canvas.width = Math.floor(cssWidth * dpr);
   canvas.height = Math.floor(cssHeight * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // scale drawing back to CSS pixels
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (game) game.onResize(cssWidth, cssHeight);
 }
 window.addEventListener('resize', resizeCanvas, { passive: true });
 
 // Pointer input
 let pointerDown = false;
-function onPointerDown(e) {
-  pointerDown = true;
-  game?.onPress();
-}
-function onPointerUp(e) {
-  pointerDown = false;
-  game?.onRelease();
-}
+function onPointerDown(e) { pointerDown = true; game?.onPress(e.clientX, e.clientY); }
+function onPointerUp(e) { pointerDown = false; game?.onRelease(e.clientX, e.clientY); }
 canvas.addEventListener('pointerdown', onPointerDown);
 window.addEventListener('pointerup', onPointerUp);
-window.addEventListener('blur', () => {
-  // ensure release if window loses focus
-  if (pointerDown) {
-    pointerDown = false;
-    game?.onRelease();
-  }
-});
+window.addEventListener('blur', () => { if (pointerDown) { pointerDown = false; game?.onRelease(); } });
 
-// Game loop
+// Service worker (PWA)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW registration failed:', err));
+  });
+}
+
+// Game module (inlined for single-file simplicity)
+import { createGame } from './game.js';
+
 let last = performance.now();
 let game = null;
 
 function loop(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); // clamp to prevent big jumps
+  const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   game.update(dt, pointerDown);
   game.render(ctx);
@@ -52,13 +46,3 @@ function loop(now) {
 resizeCanvas();
 game = createGame(canvas);
 requestAnimationFrame(loop);
-
-
-// Register service worker for PWA (served from /sw.js in Vite public/)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(err => {
-      console.warn('SW registration failed:', err);
-    });
-  });
-}

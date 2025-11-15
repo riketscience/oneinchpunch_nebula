@@ -1,48 +1,28 @@
-# One-Touch Gravity (Starter)
+# One Inch Punch Nebula (Canvas + PWA)
 
-Minimal, mobile-first HTML5 Canvas game scaffold using Vite. No nested repo folders.
+This is a mobile-first HTML5 Canvas game scaffold with:
+- PWA (installable, offline shell)
+- One-touch thrust (hold), auto-rotate on release
+- Stationary spawns (coins/hazards) attracted by your gravity
+- Fewer reds (≈22%), coins ≈78%
+- Hazard–hazard merge into green elites (toned down)
+- Wall bounce with 5% loss
+- Score (+10 coin, +25 off-screen hazard), Energy (-10% on hazard hit)
+- Explosion shards + delayed safe respawn
+- Wormhole appears at score 200; enter to complete level
+- All non-player objects scaled to 60% radius
+- Safe spawn (not near current or projected position in 0.25s)
+- HUD: Energy (⚡) and Score (🪙) bars side-by-side, half-screen each
 
 ## Quick start
-
 ```bash
-# 1) Unzip into your chosen folder (this is the repo root).
-# 2) From that folder:
 npm i
-npm run dev
-# Open the printed local URL on your phone or desktop.
+npm run dev -- --host
+# open the Network URL on your phone
 ```
 
-## Build for production
-
+## Build
 ```bash
 npm run build
-npm run preview
+npm run preview -- --host
 ```
-
-## What you get
-
-- Fullscreen, responsive canvas (mobile-first)
-- Stable game loop with delta time
-- One-touch input model:
-  - Press/hold: lock thrust direction from current ship angle and accelerate
-  - Release: ship rotates again and applies drag (slow decel)
-- Simple body spawner (coins + hazards), attraction toward ship within radius
-- Garbage collection for off-screen bodies
-- No heavy libs; easy to copy/paste and iterate
-
-## File structure
-
-```
-.
-├── index.html
-├── package.json
-├── README.md
-├── public/
-│   └── favicon.svg
-└── src/
-    ├── main.js
-    ├── game.js
-    └── style.css
-```
-
-Rename the folder to your game name whenever you like; there's no extra nesting.

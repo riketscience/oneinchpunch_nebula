@@ -1,5 +1,5 @@
-// Minimal service worker: App Shell-style with cache-first for static assets.
-const CACHE = 'otg-cache-v1';
+// Minimal service worker: cache shell + network-first for JS/CSS.
+const CACHE = 'nebula-cache-v1';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -9,38 +9,31 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
-  );
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.map(k => (k !== CACHE ? caches.delete(k) : null)))).then(() => self.clients.claim())
+    caches.keys().then(keys => Promise.all(keys.map(k => (k !== CACHE ? caches.delete(k) : null))))
+      .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
-
-  // Only handle same-origin
   if (url.origin !== location.origin) return;
 
-  // For JS/CSS assets built by Vite, prefer network then cache fallback.
   if (req.destination === 'script' || req.destination === 'style' || req.destination === 'document') {
     event.respondWith(
       fetch(req).then(resp => {
-        const respClone = resp.clone();
-        caches.open(CACHE).then(cache => cache.put(req, respClone));
+        const clone = resp.clone();
+        caches.open(CACHE).then(cache => cache.put(req, clone));
         return resp;
       }).catch(() => caches.match(req))
     );
     return;
   }
 
-  // For other stuff, try cache first then network.
-  event.respondWith(
-    caches.match(req).then(cached => cached || fetch(req))
-  );
+  event.respondWith(caches.match(req).then(c => c || fetch(req)));
 });
