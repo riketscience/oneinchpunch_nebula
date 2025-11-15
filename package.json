@@ -1,12 +1,12 @@
 {
   "name": "oneinchpunch_nebula",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview --port 5173"
+    "dev": "node ./node_modules/vite/bin/vite.js --host",
+    "build": "node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview --port 5173 --host"
   },
   "devDependencies": {
     "vite": "^5.4.0"

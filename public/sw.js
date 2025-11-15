@@ -1,11 +1,5 @@
-// Minimal service worker: cache shell + network-first for JS/CSS.
 const CACHE = 'nebula-cache-v1';
-const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/favicon.svg',
-  '/manifest.webmanifest'
-];
+const APP_SHELL = ['/', '/index.html', '/favicon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -23,7 +17,6 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-
   if (req.destination === 'script' || req.destination === 'style' || req.destination === 'document') {
     event.respondWith(
       fetch(req).then(resp => {
@@ -34,6 +27,5 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-
   event.respondWith(caches.match(req).then(c => c || fetch(req)));
 });
