@@ -52,3 +52,13 @@ function loop(now) {
 resizeCanvas();
 game = createGame(canvas);
 requestAnimationFrame(loop);
+
+
+// Register service worker for PWA (served from /sw.js in Vite public/)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}

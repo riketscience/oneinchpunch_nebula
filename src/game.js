@@ -1,4 +1,4 @@
-// Simple one-touch gravity starter.
+// Simple one-touch gravity starter with merges and wall bounce.
 // No libraries. Tweak constants to taste.
 
 export function createGame(canvas) {
@@ -8,16 +8,16 @@ export function createGame(canvas) {
   // --- Constants ---
   const TWO_PI = Math.PI * 2;
   const SHIP_RADIUS = 14;
-  const SHIP_THRUST = 180;       // px/s^2 while holding
-  const SHIP_DRAG = 0.98;        // velocity multiplier per frame when not thrusting
-  const ROT_PERIOD = 1.2;        // seconds per full rotation
+  const SHIP_THRUST = 180;         // px/s^2 while holding
+  const SHIP_DRAG = 0.98;          // velocity multiplier per frame when not thrusting
+  const ROT_PERIOD = 1.2;          // seconds per full rotation
   const ANGULAR_VEL = TWO_PI / ROT_PERIOD;
-  const ATTRACT_RADIUS = 220;    // px
-  const GRAVITY_K = 160;         // attraction strength
-  const SHIP_GRAVITY_FACTOR = 0.25; // how much ship is pulled by bodies
+  const ATTRACT_RADIUS = 220;      // px (base; bodies can scale it)
+  const GRAVITY_K = 160;           // attraction strength (base)
+  const SHIP_GRAVITY_FACTOR = 0.25;// how much ship is pulled by bodies
   const MAX_BODIES = 50;
-  const SPAWN_INTERVAL = 0.9;    // seconds
-  const OFFSCREEN_MARGIN = 120;  // px
+  const SPAWN_INTERVAL = 1.8;      // seconds (slower spawn)
+  const OFFSCREEN_MARGIN = 120;    // px
   const COIN_RADIUS = 9;
   const HAZARD_RADIUS = 12;
 
@@ -33,7 +33,7 @@ export function createGame(canvas) {
     alive: true,
   };
 
-  let bodies = []; // {x,y,vx,vy,radius,type:'coin'|'hazard'}
+  let bodies = []; // {x,y,vx,vy,radius,type,gravMult,attractMul,speedMul}
   let spawnTimer = 0;
 
   function reset() {
@@ -57,35 +57,28 @@ export function createGame(canvas) {
 
   function spawnBody() {
     if (bodies.length >= MAX_BODIES) return;
-    // spawn on the edges with slight randomness
-    const side = Math.floor(Math.random() * 4);
-    let x, y;
-    if (side === 0) { // top
-      x = Math.random() * W(); y = -20;
-    } else if (side === 1) { // right
-      x = W()+20; y = Math.random() * H();
-    } else if (side === 2) { // bottom
-      x = Math.random() * W(); y = H()+20;
-    } else { // left
-      x = -20; y = Math.random() * H();
-    }
-    const type = Math.random() < 0.65 ? "coin" : "hazard";
+    // Spawn inside the current viewport at random position; stationary until attracted
+    const x = Math.random() * W();
+    const y = Math.random() * H();
+    // ~25% coins, ~75% hazards
+    const type = Math.random() < 0.25 ? "coin" : "hazard";
     const radius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
-    // small random drift
-    const a = Math.random() * Math.PI * 2;
-    const s = 20 + Math.random() * 40;
     bodies.push({
       type, radius,
       x, y,
-      vx: Math.cos(a) * s * 0.2,
-      vy: Math.sin(a) * s * 0.2
+      vx: 0, vy: 0,
+      gravMult: 1,     // scales GRAVITY_K strength on this body
+      attractMul: 1,   // scales ATTRACT_RADIUS reach on this body
+      speedMul: 1      // scales how strongly velocity responds to attraction
     });
   }
 
   function applyAttraction(dt) {
-    const r2 = ATTRACT_RADIUS * ATTRACT_RADIUS;
     for (let i = bodies.length - 1; i >= 0; i--) {
       const b = bodies[i];
+      const localRadius = ATTRACT_RADIUS * (b.attractMul || 1);
+      const r2 = localRadius * localRadius;
+
       const dx = b.x - ship.x;
       const dy = b.y - ship.y;
       const d2 = dx*dx + dy*dy;
@@ -93,16 +86,16 @@ export function createGame(canvas) {
       if (d2 < r2 && d2 > 1) {
         const d = Math.sqrt(d2);
         const ux = dx / d, uy = dy / d;
-        const falloff = 1 - (d / ATTRACT_RADIUS); // 1 near, 0 at edge
-        const force = GRAVITY_K * falloff;
+        const falloff = 1 - (d / (ATTRACT_RADIUS * (b.attractMul || 1))); // 1 near, 0 at edge
+        const force = GRAVITY_K * falloff * (b.gravMult || 1);
 
-        // Pull body toward ship
-        b.vx -= ux * force * dt;
-        b.vy -= uy * force * dt;
+        // Pull body toward ship, scaled by speed multiplier
+        b.vx -= ux * force * dt * (b.speedMul || 1);
+        b.vy -= uy * force * dt * (b.speedMul || 1);
 
-        // Optionally pull ship slightly toward body (for feel)
-        ship.vx += ux * force * dt * SHIP_GRAVITY_FACTOR;
-        ship.vy += uy * force * dt * SHIP_GRAVITY_FACTOR;
+        // Ship pulled proportionally to body strength
+        ship.vx += ux * force * dt * SHIP_GRAVITY_FACTOR * (b.gravMult || 1);
+        ship.vy += uy * force * dt * SHIP_GRAVITY_FACTOR * (b.gravMult || 1);
       }
     }
   }
@@ -114,8 +107,9 @@ export function createGame(canvas) {
       ship.vy += Math.sin(ship.thrustDir) * SHIP_THRUST * dt;
     } else {
       // Apply drag (fake space friction)
-      ship.vx *= Math.pow(SHIP_DRAG, clamp(dt * 60, 0, 5));
-      ship.vy *= Math.pow(SHIP_DRAG, clamp(dt * 60, 0, 5));
+      const frames = clamp(dt * 60, 0, 5);
+      ship.vx *= Math.pow(SHIP_DRAG, frames);
+      ship.vy *= Math.pow(SHIP_DRAG, frames);
       ship.angle += ship.angularVel * dt;
       if (ship.angle > Math.PI) ship.angle -= Math.PI * 2;
     }
@@ -127,9 +121,66 @@ export function createGame(canvas) {
     ship.x += ship.vx * dt;
     ship.y += ship.vy * dt;
 
+    // Wall bounce with 5% velocity loss on impact
+    const minX = SHIP_RADIUS, maxX = W() - SHIP_RADIUS;
+    const minY = SHIP_RADIUS, maxY = H() - SHIP_RADIUS;
+    const BOUNCE_DAMP = 0.95;
+
+    if (ship.x < minX) { ship.x = minX; ship.vx = -ship.vx * BOUNCE_DAMP; }
+    if (ship.x > maxX) { ship.x = maxX; ship.vx = -ship.vx * BOUNCE_DAMP; }
+    if (ship.y < minY) { ship.y = minY; ship.vy = -ship.vy * BOUNCE_DAMP; }
+    if (ship.y > maxY) { ship.y = maxY; ship.vy = -ship.vy * BOUNCE_DAMP; }
+
     for (const b of bodies) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
+    }
+  }
+
+  // Merge pairs of red hazards on collision into a green elite
+  function handleBodyMerges() {
+    for (let i = bodies.length - 1; i >= 0; i--) {
+      const a = bodies[i];
+      if (a.type !== 'hazard') continue;
+      for (let j = i - 1; j >= 0; j--) {
+        const b = bodies[j];
+        if (b.type !== 'hazard') continue;
+        const minDist = a.radius + b.radius;
+        const dx = a.x - b.x, dy = a.y - b.y;
+        if (dx*dx + dy*dy <= minDist * minDist) {
+          // masses proportional to area (radius^2)
+          const mA = a.radius * a.radius;
+          const mB = b.radius * b.radius;
+          const mTot = mA + mB || 1;
+          // combined momentum => velocity
+          const vx = (a.vx * mA + b.vx * mB) / mTot;
+          const vy = (a.vy * mA + b.vy * mB) / mTot;
+
+          // New green elite properties
+          const newRadius = Math.max(a.radius, b.radius) * 1.15; // 15% bigger than larger parent
+          const green = {
+            type: 'hazard_elite',
+            radius: newRadius,
+            x: (a.x * mA + b.x * mB) / mTot,
+            y: (a.y * mA + b.y * mB) / mTot,
+            // 60% faster than reds
+            vx: vx * 1.6,
+            vy: vy * 1.6,
+            // stronger + farther attraction
+            gravMult: 1.6,
+            attractMul: 1.4,
+            speedMul: 1.6
+          };
+
+          // Remove the originals and add the green
+          bodies.splice(i, 1);
+          bodies.splice(j, 1);
+          bodies.push(green);
+          // restart outer loop since indices changed
+          i = bodies.length; // will -- at loop top
+          break;
+        }
+      }
     }
   }
 
@@ -144,10 +195,9 @@ export function createGame(canvas) {
           bodies.splice(i, 1);
         } else {
           ship.alive = false;
-          // simple knockback and cleanup
+          // simple knockback
           ship.vx *= -0.3;
           ship.vy *= -0.3;
-          // For now: reset after brief "death"
         }
       }
     }
@@ -158,7 +208,7 @@ export function createGame(canvas) {
     bodies = bodies.filter(b => (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom));
   }
 
-  // --- API: input ---
+  // --- Input ---
   function onPress() {
     if (!ship.alive) return;
     ship.state = "thrusting";
@@ -170,6 +220,8 @@ export function createGame(canvas) {
   }
 
   // --- Update / Render ---
+  let deadTimer = 0.8;
+
   function update(dt/*, isHeld */) {
     if (!ship.alive) {
       // quick respawn timer
@@ -183,9 +235,9 @@ export function createGame(canvas) {
       spawnBody();
     }
     integrate(dt);
-    handleCollisions();
+    handleBodyMerges();   // merge red hazards into green elites
+    handleCollisions();   // ship collisions + GC
   }
-  let deadTimer = 0.8;
 
   function render(ctx) {
     const w = W(), h = H();
@@ -208,8 +260,10 @@ export function createGame(canvas) {
       ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
       if (b.type === 'coin') {
         ctx.fillStyle = '#ffd54a';
+      } else if (b.type === 'hazard_elite') {
+        ctx.fillStyle = '#00ff66'; // bright green
       } else {
-        ctx.fillStyle = '#ff5252';
+        ctx.fillStyle = '#ff5252'; // red hazard
       }
       ctx.fill();
     }
