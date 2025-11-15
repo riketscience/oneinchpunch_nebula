@@ -1,15 +1,1 @@
-{
-  "name": "One Inch Punch Nebula",
-  "short_name": "Nebula",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
-  "icons": [
-    {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
-  ]
-}
+{"name": "Nebula", "short_name": "Nebula", "start_url": "/", "display": "standalone", "background_color": "#000", "theme_color": "#000"}
