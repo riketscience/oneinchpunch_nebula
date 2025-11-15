@@ -3,12 +3,19 @@ const ctx = canvas.getContext('2d', { alpha: false });
 
 function resizeCanvas() {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
-  const cssWidth = Math.max(1, Math.floor(window.innerWidth));
-  const cssHeight = Math.max(1, Math.floor(window.innerHeight));
+
+  // Use visualViewport for dynamic mobile toolbars when available
+  const vw = window.visualViewport?.width ?? window.innerWidth;
+  const vh = window.visualViewport?.height ?? window.innerHeight;
+
+  const cssWidth  = Math.max(1, Math.floor(vw));
+  const cssHeight = Math.max(1, Math.floor(vh));
+
   canvas.style.width = cssWidth + 'px';
   canvas.style.height = cssHeight + 'px';
   canvas.width = Math.floor(cssWidth * dpr);
   canvas.height = Math.floor(cssHeight * dpr);
+
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (game) game.onResize(cssWidth, cssHeight);
 }
@@ -27,6 +34,11 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(err => console.warn('SW registration failed:', err));
   });
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resizeCanvas, { passive: true });
+  window.visualViewport.addEventListener('scroll', resizeCanvas, { passive: true }); // address toolbar show/hide
 }
 
 // Game module (inlined for single-file simplicity)

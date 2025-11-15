@@ -346,20 +346,23 @@ export function createGame(canvas) {
     }
 
     // Remove offscreen bodies (award +25 for hazards that leave)
-    const left = -OFFSCREEN_MARGIN, top = -OFFSCREEN_MARGIN;
-    const right = W() + OFFSCREEN_MARGIN, bottom = H() + OFFSCREEN_MARGIN;
-    {
-      const kept = [];
-      for (const b of bodies) {
-        const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
-        if (inside) {
-          kept.push(b);
-        } else {
-          if (b.type === 'hazard' || b.type === 'hazard_elite') ship.score += 25;
-        }
-      }
-      bodies = kept;
+const M = 8; // small margin to avoid edge flicker
+const left = -M, top = -M;
+const right = W() + M, bottom = H() + M;
+
+{
+  const kept = [];
+  for (const b of bodies) {
+    const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
+    if (inside) {
+      kept.push(b);
+    } else {
+      if (b.type === 'hazard' || b.type === 'hazard_elite') ship.score += 25;
+      // coins are just discarded silently off-screen
     }
+  }
+  bodies = kept;
+}
   }
 
   // Wormhole helpers
