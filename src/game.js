@@ -5,6 +5,10 @@ export function createGame(canvas) {
   // --- Constants ---
   const TWO_PI = Math.PI * 2;
   const SHIP_RADIUS = 14;
+  const HUD_SAFE_BOTTOM = 64; // bottom of HUD/UI zone
+
+  const COIN_IMPULSE = 28; // how strongly a collected coin nudges the ship
+
   const SHIP_THRUST = 180;
   const SHIP_DRAG = 0.98;
   const ROT_PERIOD = 1.2;
@@ -30,13 +34,12 @@ export function createGame(canvas) {
     alive: true,
   };
 
-// Background image
-const bgImage = new Image();
-// NOTE: adjust extension if your file is e.g. .jpg instead of .png
-bgImage.src = '/images/backg_main.jpg';
-let bgReady = false;
-bgImage.onload = () => { bgReady = true; };
-
+  // Background image
+  const bgImage = new Image();
+  // NOTE: adjust extension if your file is e.g. .png instead of .jpg
+  bgImage.src = '/images/backg_main.jpg';
+  let bgReady = false;
+  bgImage.onload = () => { bgReady = true; };
 
   let bodies = []; // {x,y,vx,vy,radius,type,gravMult,attractMul,speedMul}
   let spawnTimer = 0;
@@ -49,8 +52,8 @@ bgImage.onload = () => { bgReady = true; };
   let levelIndex = 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
 
-  // Phase: 'playing' | 'captured' | 'betweenLevels'
-  let phase = 'playing';
+  // Phase: 'start' | 'playing' | 'captured' | 'betweenLevels'
+  let phase = 'start';
   let captureTimer = 0.0; // 2.5s
   let betweenTimer = 0.0;
   let betweenStage = 0; // 0: level complete, 1: get ready, 2: countdown
@@ -111,6 +114,8 @@ bgImage.onload = () => { bgReady = true; };
     while (tries < 30) {
       x = Math.random() * W();
       y = Math.random() * H();
+      // avoid HUD zone at the top
+      if (y < HUD_SAFE_BOTTOM + radius + 8) { tries++; continue; }
       const dxNow = x - ship.x, dyNow = y - ship.y;
       const dxFuture = x - projX, dyFuture = y - projY;
       const safeNow = (dxNow*dxNow + dyNow*dyNow) > SAFE_MARGIN * SAFE_MARGIN;
@@ -163,7 +168,7 @@ bgImage.onload = () => { bgReady = true; };
     ship.y += ship.vy * dt;
 
     const minX = SHIP_RADIUS, maxX = W() - SHIP_RADIUS;
-    const minY = SHIP_RADIUS, maxY = H() - SHIP_RADIUS;
+    const minY = HUD_SAFE_BOTTOM + SHIP_RADIUS / 4, maxY = H() - SHIP_RADIUS;
     const BOUNCE_DAMP = 0.95;
     if (ship.x < minX) { ship.x = minX; ship.vx = -ship.vx * BOUNCE_DAMP; }
     if (ship.x > maxX) { ship.x = maxX; ship.vx = -ship.vx * BOUNCE_DAMP; }
@@ -287,14 +292,26 @@ bgImage.onload = () => { bgReady = true; };
         if (invulnTimer > 0) continue;
         if (b.type === "coin") {
           ship.score += 10;
+          // Small impulse from the coin into the ship
+          const dx = ship.x - b.x;
+          const dy = ship.y - b.y;
+          const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+          const ux = dx / dist, uy = dy / dist;
+          ship.vx += ux * COIN_IMPULSE;
+          ship.vy += uy * COIN_IMPULSE;
           bodies.splice(i, 1);
         } else {
           // Enemy hit: remove enemy immediately and apply damage once
           bodies.splice(i, 1);
-          energy = Math.max(0, energy - 0.10);
+          const dmg = 0.14; // slightly higher damage
+          energy -= dmg;
+          if (energy <= 0 && ship.alive) {
+            energy = 0;
+            triggerExplosion();
+          }
           // mild knockback for feedback
           ship.vx *= -0.4; ship.vy *= -0.4;
-          if (energy <= 0 && ship.alive) triggerExplosion();
+          hitFlashTimer = 0.1;
           break; // ensure only one enemy hit is processed this frame
         }
       }
@@ -357,6 +374,10 @@ bgImage.onload = () => { bgReady = true; };
   let wormhole = null;
   let wormholeActive = false;
 
+  // UI state
+  const startBtn = { x: 0, y: 0, w: 240, h: 56 };
+  let hitFlashTimer = 0.0;
+
   // --- Input ---
   function startNextLevel() {
     levelIndex = Math.min(levelIndex + 1, levels.length - 1);
@@ -366,7 +387,6 @@ bgImage.onload = () => { bgReady = true; };
     wormholeActive = false;
     wormhole = null;
     fragments = [];
-    energy = 1.0;
     ship.score = 0;
     ship.x = W()*0.5; ship.y = H()*0.5;
     ship.vx = 0; ship.vy = 0;
@@ -376,6 +396,18 @@ bgImage.onload = () => { bgReady = true; };
   }
 
   function onPress(px, py) {
+    if (phase === 'start') {
+      if (px != null && py != null) {
+        const x = px, y = py;
+        if (x >= startBtn.x && x <= startBtn.x + startBtn.w &&
+            y >= startBtn.y && y <= startBtn.y + startBtn.h) {
+          phase = 'playing';
+          return;
+        }
+      }
+      return;
+    }
+
     if (phase !== 'playing') return;
     if (!ship.alive) return;
     ship.state = "thrusting";
@@ -392,14 +424,25 @@ bgImage.onload = () => { bgReady = true; };
 
   function update(dt) {
 
+    if (phase === 'start') {
+      // Start screen: no gameplay yet
+      return;
+    }
+
     if (phase === 'captured') {
-            if (wormhole) {
+      if (wormhole) {
         const dx = wormhole.x - ship.x, dy = wormhole.y - ship.y;
         ship.vx = dx * 3.0; ship.vy = dy * 3.0;
         ship.x += ship.vx * dt; ship.y += ship.vy * dt;
       }
-      // Spin up rotation on capture (same across levels)
-      ship.angularVel = (TWO_PI / ROT_PERIOD) * 2.2;
+
+      // Exponential spin-up as ship sinks into the wormhole (visual only)
+      const totalCapture = 2.5;
+      const t = Math.max(0, Math.min(1, 1 - captureTimer / totalCapture));
+      const spinMult = 1 + 4 * (t * t);
+      ship.angle += ship.angularVel * spinMult * dt;
+      if (ship.angle > Math.PI) ship.angle -= Math.PI * 2;
+
       captureTimer -= dt;
       if (captureTimer <= 0) {
         phase = 'betweenLevels';
@@ -443,6 +486,7 @@ bgImage.onload = () => { bgReady = true; };
     integrate(dt);
     handleBodyMerges();
     invulnTimer = Math.max(0, invulnTimer - dt);
+    hitFlashTimer = Math.max(0, hitFlashTimer - dt);
     handleCollisions();
 
     if (!wormholeActive && ship.score >= scoreGoal) spawnWormhole();
@@ -456,10 +500,13 @@ bgImage.onload = () => { bgReady = true; };
 const w = W(), h = H();
 ctx.fillStyle = '#000';
 ctx.fillRect(0, 0, w, h);
-if (bgReady) {
+if (bgReady && bgImage.width > 0 && bgImage.height > 0) {
   ctx.save();
   ctx.globalAlpha = 0.5; // darken ~50%
-  ctx.drawImage(bgImage, 0, 0, w, h);
+  const scale = Math.max(w / bgImage.width, h / bgImage.height);
+  const dw = bgImage.width * scale;
+  const dh = bgImage.height * scale;
+  ctx.drawImage(bgImage, 0, 0, dw, dh); // cover, anchored top-left
   ctx.restore();
 }
 
@@ -505,7 +552,7 @@ if (bgReady) {
     const totalW = w - padding * 2 - gap;
     const halfW = totalW * 0.5;
     const barH = 16;
-    const topY = 14;
+    const topY = 32;
 
     // Energy
     {
@@ -532,7 +579,75 @@ if (bgReady) {
       ctx.fillText('🪙 Score', x, y - 2);
     }
 
-    // Overlay: between-level messages + countdown
+    // Hit flash overlay when recently damaged
+    if (hitFlashTimer > 0) {
+      const alpha = Math.min(0.4, hitFlashTimer / 0.1 * 0.4);
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,60,60,' + alpha + ')';
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+// Overlay: start screen
+if (phase === 'start') {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, 0, w, h);
+
+  const panelW = w * 0.8;
+  const panelH = h * 0.8;
+  const px = w * 0.1;
+  const py = h * 0.1;
+
+  // Panel background
+  ctx.fillStyle = 'rgba(100, 255, 180, 0.5)';
+  ctx.fillRect(px, py, panelW, panelH);
+
+  // Panel border
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#a8ffd9';
+  ctx.strokeRect(px, py, panelW, panelH);
+
+  ctx.fillStyle = '#022';
+  ctx.textAlign = 'center';
+
+  // Title
+  ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  ctx.fillText('One Inch Punch Nebula', w * 0.5, py + 60);
+
+  // Instructions
+  ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  const lines = [
+    'Hold anywhere on the screen to thrust.',
+    'Your ship accelerates in the direction it was facing.',
+    'Collect gold coins to fill the score bar.',
+    'Red and green hazards drain your energy.',
+    'Use gravity to slingshot hazards off-screen.',
+    'When the vortex appears, fly into it to finish the level.'
+  ];
+  let ly = py + 110;
+  for (const line of lines) {
+    ctx.fillText(line, w * 0.5, ly);
+    ly += 24;
+  }
+
+  // Start button
+  startBtn.w = 240; startBtn.h = 56;
+  startBtn.x = w * 0.5 - startBtn.w / 2;
+  startBtn.y = py + panelH - 100;
+  ctx.fillStyle = '#16c784';
+  ctx.fillRect(startBtn.x, startBtn.y, startBtn.w, startBtn.h);
+  ctx.strokeStyle = '#c8ffe6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(startBtn.x, startBtn.y, startBtn.w, startBtn.h);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 20px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+  ctx.fillText('Start Game', w * 0.5, startBtn.y + startBtn.h / 2 + 7);
+
+  ctx.restore();
+}
+
+// Overlay: between-level messages + countdown
     if (phase === 'betweenLevels') {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
