@@ -17,6 +17,7 @@ export function createGame(canvas) {
   const COIN_RADIUS = 9;
   const HAZARD_RADIUS = 12;
   const OBJECT_SCALE = 0.6;
+  const nothigAtAll = 0;
 
   // --- State ---
   const ship = {
