@@ -16,8 +16,8 @@ export function createGame(canvas) {
   const ATTRACT_RADIUS = 220;    // base attract radius; coins use 75% of this visually
   const GRAVITY_K = 160;
   const SHIP_GRAVITY_FACTOR = 0.25;
-  const MAX_BODIES = 50;
-  const SPAWN_INTERVAL = 1.8;
+  const MAX_BODIES = 40;
+  const SPAWN_INTERVAL = 2.4;
   const COIN_RADIUS = 9;
   const HAZARD_RADIUS = 12;
   const OBJECT_SCALE = 0.6;
@@ -156,7 +156,7 @@ export function createGame(canvas) {
   function spawnBody() {
     if (bodies.length >= MAX_BODIES) return;
 
-    const type = Math.random() < 0.78 ? "coin" : "hazard";
+    const type = Math.random() < 0.7 ? "coin" : "hazard";
     const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
     const radius = baseRadius * OBJECT_SCALE;
 
@@ -730,7 +730,7 @@ export function createGame(canvas) {
       ctx.font = 'bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('🪙 Score', x, y - 2);
+      ctx.fillText('🪙 Warp drive', x, y - 2);
     }
 
     // Lives (mini ships, top-right)
@@ -802,12 +802,16 @@ export function createGame(canvas) {
       ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       const lines = [
         'Hold anywhere on the screen to thrust.',
-        'Your ship accelerates in the durection',
+        'Your ship accelerates in the direction',
         'that it is currently facing.',
         'Collect stars to build up warp drive.',
         'Red & green pulsars drain your energy.',
         'Use gravity to slingshot them off-screen.',
-        'Enter the vortex to finish the level.'
+        'This greatly increases your warp drive.',
+        ' ',
+        ' ',
+        'Once you\'ve built up enough warp drive',
+        'enter the vortex to finish the level...'
       ];
       let ly = py + 110;
       for (const line of lines) {
