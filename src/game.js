@@ -22,6 +22,12 @@ export function createGame(canvas) {
   const HAZARD_RADIUS = 12;
   const OBJECT_SCALE = 0.6;
 
+  // Health pickup (white circle with red cross)
+  const HEALTH_RADIUS = 10; // size only; spawn interval is per-level
+  const HEALTH_SPEED = 40;
+  const HEALTH_ATTRACT_MULT = 0.75; // 25% less attraction than default
+  const DEFAULT_HEALTH_FREQUENCY = Math.floor(Math.random() * 20) + 20;
+
   // --- Ship state ---
   const ship = {
     x: 0, y: 0, vx: 0, vy: 0,
@@ -39,14 +45,18 @@ export function createGame(canvas) {
   let bgReady = false;
   bgImage.onload = () => { bgReady = true; };
 
-  // --- Bodies (coins, hazards, elites) ---
-  let bodies = []; // {x,y,vx,vy,radius,type,gravMult,attractMul,speedMul}
+  // --- Bodies (coins, hazards, elites, health) ---
+  // {x,y,vx,vy,radius,type,gravMult,attractMul,speedMul}
+  let bodies = [];
   let spawnTimer = 0;
+  let healthSpawnTimer = 0;
 
   // --- Levels ---
   const levels = [
     {
       scoreGoal: 200,
+      coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // between 30–60s
       typeBoost: {
         coin: { grav: 1.0, speed: 1.0 },
         hazard: { grav: 1.0, speed: 1.0 },
@@ -55,14 +65,18 @@ export function createGame(canvas) {
     },
     {
       scoreGoal: 250,
+      coinHazardSpawnRatio: 0.7,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
       typeBoost: {
         coin: { grav: 1.1, speed: 1.1 },
         hazard: { grav: 1.1, speed: 1.1 },
         elite: { grav: 1.1, speed: 1.1 },
       },
     },
-        {
+    {
       scoreGoal: 300,
+      coinHazardSpawnRatio: 0.7,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
       typeBoost: {
         coin: { grav: 1.22, speed: 1.22 },
         hazard: { grav: 1.22, speed: 1.22 },
@@ -114,6 +128,10 @@ export function createGame(canvas) {
   function applyLevelBoost(body) {
     const cfg = levels[levelIndex] || levels[0];
     const tb = cfg.typeBoost || {};
+
+    // Health pickups ignore boosts – only coins/hazards/elites get them
+    if (body.type === 'health') return;
+
     const key = body.type === 'coin' ? 'coin' : (body.type === 'hazard_elite' ? 'elite' : 'hazard');
     const f = tb[key] || { grav: 1.0, speed: 1.0 };
     body.gravMult = (body.gravMult || 1) * (f.grav || 1);
@@ -121,7 +139,9 @@ export function createGame(canvas) {
   }
 
   function resetShipForLevel() {
-    scoreGoal = levels[levelIndex].scoreGoal;
+    const cfg = levels[levelIndex] || levels[0];
+    scoreGoal = cfg.scoreGoal;
+
     ship.x = W() * 0.5;
     ship.y = H() * 0.5;
     ship.vx = 0; ship.vy = 0;
@@ -130,7 +150,9 @@ export function createGame(canvas) {
     ship.thrustDir = ship.angle;
     ship.alive = true;
     ship.score = 0;
+
     spawnTimer = 0;
+    healthSpawnTimer = 0;
     fragments = [];
     respawnPending = false;
     respawnCheckTimer = 0;
@@ -152,11 +174,14 @@ export function createGame(canvas) {
     gameOverTimer = 0;
   }
 
-  // --- Spawning ---
+  // --- Spawning (coins/hazards) ---
   function spawnBody() {
     if (bodies.length >= MAX_BODIES) return;
 
-    const type = Math.random() < 0.7 ? "coin" : "hazard";
+    const levelCfg = levels[levelIndex] || levels[0];
+    const ratio = levelCfg.coinHazardSpawnRatio ?? 0.7;
+    const type = Math.random() < ratio ? "coin" : "hazard";
+
     const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
     const radius = baseRadius * OBJECT_SCALE;
 
@@ -183,6 +208,49 @@ export function createGame(canvas) {
 
     const body = { type, radius, x, y, vx: 0, vy: 0, gravMult: 1, attractMul: 1, speedMul: 1 };
     applyLevelBoost(body);
+    bodies.push(body);
+  }
+
+  // --- Spawning (health pickup) ---
+  function spawnHealthPickup() {
+    const radius = HEALTH_RADIUS * OBJECT_SCALE;
+
+    // Spawn just *inside* the visible area on left or right, heading toward play-area center
+    const side = Math.random() < 0.5 ? 'left' : 'right';
+
+    let x;
+    if (side === 'left') {
+      x = radius + 2;           // near left edge, fully visible
+    } else {
+      x = W() - radius - 2;     // near right edge, fully visible
+    }
+
+    const yMin = HUD_SAFE_BOTTOM + radius + 8;
+    const yMax = H() - radius - 8;
+    const yRange = Math.max(10, yMax - yMin);
+    let y = yMin + Math.random() * yRange;
+
+    const cx = W() * 0.5;
+    const cy = H() * 0.5;
+    let dx = cx - x;
+    let dy = cy - y;
+    let d = Math.sqrt(dx * dx + dy * dy) || 1;
+    dx /= d;
+    dy /= d;
+
+    const body = {
+      type: 'health',
+      radius,
+      x,
+      y,
+      vx: dx * HEALTH_SPEED,
+      vy: dy * HEALTH_SPEED,
+      gravMult: 1.0,
+      attractMul: HEALTH_ATTRACT_MULT, // 25% weaker attraction
+      speedMul: 1.0
+    };
+
+    console.log('Spawned health pickup at', x, y);
     bodies.push(body);
   }
 
@@ -287,6 +355,41 @@ export function createGame(canvas) {
     }
   }
 
+  // --- Health vs hazard collisions (destroy health) ---
+  function handleHealthHazardCollisions() {
+    for (let i = bodies.length - 1; i >= 0; i--) {
+      const a = bodies[i];
+      if (a.type !== 'health' && a.type !== 'hazard' && a.type !== 'hazard_elite') continue;
+
+      for (let j = i - 1; j >= 0; j--) {
+        const b = bodies[j];
+        if (b.type !== 'health' && b.type !== 'hazard' && b.type !== 'hazard_elite') continue;
+
+        // One must be health, the other hazard / hazard_elite
+        const isHealthA = a.type === 'health';
+        const isHealthB = b.type === 'health';
+        const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite');
+        const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite');
+
+        if (!((isHealthA && isHazardB) || (isHealthB && isHazardA))) {
+          continue;
+        }
+
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const minDist = a.radius + b.radius;
+        if (dx * dx + dy * dy <= minDist * minDist) {
+          // Remove the health, keep the hazard
+          const healthIndex = isHealthA ? i : j;
+          bodies.splice(healthIndex, 1);
+          // Restart outer loop since array changed
+          i = bodies.length;
+          break;
+        }
+      }
+    }
+  }
+
   // --- Explosion / respawn / lives ---
   function triggerExplosion() {
     if (!ship.alive) return;
@@ -384,7 +487,7 @@ export function createGame(canvas) {
     }
   }
 
-  // --- Collisions ---
+  // --- Collisions (ship vs bodies, off-screen scoring) ---
   function handleCollisions() {
     // Ship vs bodies
     for (let i = bodies.length - 1; i >= 0; i--) {
@@ -405,8 +508,13 @@ export function createGame(canvas) {
           ship.vy += uy * COIN_IMPULSE;
 
           bodies.splice(i, 1);
+        } else if (b.type === 'health') {
+          // Health pickup: boost energy by 0.2–0.3, clamp to 1.0
+          const delta = 0.2 + Math.random() * 0.1;
+          energy = clamp(energy + delta, 0, 1);
+          bodies.splice(i, 1);
         } else {
-          // Enemy hit
+          // Enemy hit (hazard / hazard_elite)
           bodies.splice(i, 1);
           energy -= ENEMY_DAMAGE;
           if (energy <= 0 && ship.alive) {
@@ -433,6 +541,7 @@ export function createGame(canvas) {
       else if (b.type === 'hazard' || b.type === 'hazard_elite') {
         ship.score += 25;
       }
+      // coins/health going off-screen just vanish
     }
     bodies = kept;
   }
@@ -553,6 +662,7 @@ export function createGame(canvas) {
     }
 
     if (phase === 'captured') {
+      // Keep pulling ship into wormhole
       if (wormhole) {
         const dx = wormhole.x - ship.x;
         const dy = wormhole.y - ship.y;
@@ -569,6 +679,17 @@ export function createGame(canvas) {
       ship.angle += ship.angularVel * spinMult * dt;
       if (ship.angle > Math.PI) ship.angle -= TWO_PI;
 
+      // Keep existing bodies moving & interacting while captured
+      applyAttraction(dt);
+      for (const b of bodies) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+      }
+      handleBodyMerges();
+      handleHealthHazardCollisions();
+      handleCollisions();
+      updateFragments(dt);
+
       captureTimer -= dt;
       if (captureTimer <= 0) {
         phase = 'betweenLevels';
@@ -577,7 +698,6 @@ export function createGame(canvas) {
         betweenFromLevel = levelIndex + 1;
         betweenToLevel = Math.min(levelIndex + 2, levels.length);
       }
-      updateFragments(dt);
       return;
     }
 
@@ -610,8 +730,18 @@ export function createGame(canvas) {
       spawnBody();
     }
 
+    // Independent health spawns (per-level configurable)
+    const levelCfg = levels[levelIndex] || levels[0];
+    const healthInterval = DEFAULT_HEALTH_FREQUENCY; // you can swap to levelCfg.healthSpawnInterval if you want per-level
+    healthSpawnTimer += dt;
+    if (healthSpawnTimer >= healthInterval) {
+      healthSpawnTimer = 0;
+      spawnHealthPickup();
+    }
+
     integrate(dt);
     handleBodyMerges();
+    handleHealthHazardCollisions();
     invulnTimer = Math.max(0, invulnTimer - dt);
     hitFlashTimer = Math.max(0, hitFlashTimer - dt);
     handleCollisions();
@@ -651,18 +781,39 @@ export function createGame(canvas) {
     renderWormhole(ctx);
 
     for (const b of bodies) {
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, TWO_PI);
-      if (b.type === 'coin') ctx.fillStyle = '#ffd54a';
-      else if (b.type === 'hazard_elite') ctx.fillStyle = '#00ff66';
-      else ctx.fillStyle = '#ff5252';
-      ctx.fill();
+      if (b.type === 'health') {
+        // White circle with red cross
+        ctx.save();
+        ctx.translate(b.x, b.y);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius, 0, TWO_PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+
+        ctx.fillStyle = '#ff0000';
+        const crossW = b.radius * 0.9;
+        const crossT = b.radius * 0.35;
+        // vertical bar
+        ctx.fillRect(-crossT / 2, -crossW / 2, crossT, crossW);
+        // horizontal bar
+        ctx.fillRect(-crossW / 2, -crossT / 2, crossW, crossT);
+
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, TWO_PI);
+        if (b.type === 'coin') ctx.fillStyle = '#ffd54a';
+        else if (b.type === 'hazard_elite') ctx.fillStyle = '#00ff66';
+        else ctx.fillStyle = '#ff5252';
+        ctx.fill();
+      }
     }
 
     renderFragments(ctx);
 
-    // Ship
-    if (ship.alive || phase === 'captured') {
+    // Ship (hidden during between-level overlay so it doesn't pop back full-size)
+    if (phase !== 'betweenLevels' && (ship.alive || phase === 'captured')) {
       ctx.save();
       ctx.translate(ship.x, ship.y);
       const capScale = (phase === 'captured') ? Math.max(0.1, captureTimer / 2.5) : 1;
