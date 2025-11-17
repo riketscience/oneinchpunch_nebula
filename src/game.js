@@ -18,8 +18,8 @@ export function createGame(canvas) {
   const SHIP_GRAVITY_FACTOR = 0.25;
   const MAX_BODIES = 40;
   const SPAWN_INTERVAL = 2.4;
-  const COIN_RADIUS = 9;
-  const HAZARD_RADIUS = 12;
+  const COIN_RADIUS = 8;
+  const HAZARD_RADIUS = 11
   const OBJECT_SCALE = 0.6;
 
   // Health pickup (white circle with red cross)
@@ -82,6 +82,15 @@ export function createGame(canvas) {
         hazard: { grav: 1.22, speed: 1.22 },
         elite: { grav: 1.22, speed: 1.22 },
       },
+    },    {
+      scoreGoal: 350,
+      coinHazardSpawnRatio: 0.6,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
+      typeBoost: {
+        coin: { grav: 1.35, speed: 1.35 },
+        hazard: { grav: 1.35, speed: 1.35 },
+        elite: { grav: 1.35, speed: 1.35 },
+      },
     },
   ];
   let levelIndex = 0;
@@ -111,6 +120,7 @@ export function createGame(canvas) {
   let invulnTimer = 0.0;
   let respawnCooldown = 0.0;
   let hitFlashTimer = 0.0;
+  let healFlashTimer = 0.0;   // new: blue flash for health pickup
 
   // --- Game over state ---
   let gameOverTimer = 0.0;
@@ -512,6 +522,10 @@ export function createGame(canvas) {
           // Health pickup: boost energy by 0.2–0.3, clamp to 1.0
           const delta = 0.2 + Math.random() * 0.1;
           energy = clamp(energy + delta, 0, 1);
+
+          // trigger blue heal flash
+          healFlashTimer = 0.1;
+
           bodies.splice(i, 1);
         } else {
           // Enemy hit (hazard / hazard_elite)
@@ -732,7 +746,7 @@ export function createGame(canvas) {
 
     // Independent health spawns (per-level configurable)
     const levelCfg = levels[levelIndex] || levels[0];
-    const healthInterval = DEFAULT_HEALTH_FREQUENCY; // you can swap to levelCfg.healthSpawnInterval if you want per-level
+    const healthInterval = DEFAULT_HEALTH_FREQUENCY; // or levelCfg.healthSpawnInterval
     healthSpawnTimer += dt;
     if (healthSpawnTimer >= healthInterval) {
       healthSpawnTimer = 0;
@@ -744,6 +758,7 @@ export function createGame(canvas) {
     handleHealthHazardCollisions();
     invulnTimer = Math.max(0, invulnTimer - dt);
     hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+    healFlashTimer = Math.max(0, healFlashTimer - dt);
     handleCollisions();
 
     if (!wormholeActive && ship.score >= scoreGoal) spawnWormhole();
@@ -913,11 +928,20 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
-    // Hit flash when taking damage
+    // Hit flash when taking damage (red)
     if (hitFlashTimer > 0) {
       const alpha = Math.min(0.4, (hitFlashTimer / 0.1) * 0.4);
       ctx.save();
       ctx.fillStyle = `rgba(255,60,60,${alpha})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+    // Heal flash when collecting health (soft blue)
+    if (healFlashTimer > 0) {
+      const alpha = Math.min(0.5, (healFlashTimer / 0.1) * 0.5);
+      ctx.save();
+      ctx.fillStyle = `rgba(90,180,255,${alpha})`;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
     }
