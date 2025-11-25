@@ -7,7 +7,6 @@ export function createGame(canvas) {
   const SHIP_RADIUS = 14;
 
   // HUD_SAFE_BOTTOM: bottom of HUD/UI zone (no ship / spawns above this)
-  // We reduced bar height by 25% (16 -> 12), so shrink this from 64 to 60
   const HUD_SAFE_BOTTOM = 64;
 
   const COIN_IMPULSE = 28;       // how strongly a collected coin nudges the ship
@@ -22,7 +21,7 @@ export function createGame(canvas) {
   const MAX_BODIES = 40;
   const SPAWN_INTERVAL = 2.4;
   const COIN_RADIUS = 8;
-  const HAZARD_RADIUS = 11
+  const HAZARD_RADIUS = 11;
   const OBJECT_SCALE = 0.6;
 
   // Health pickup (white circle with red cross)
@@ -36,6 +35,13 @@ export function createGame(canvas) {
   // Heal flash timing (for double flash)
   const HEAL_FLASH_TOTAL = 0.25; // total duration of double flash
 
+  // Ship collision triangle in local ship coordinates (approx)
+  const SHIP_TRI_LOCAL = [
+    { x: SHIP_RADIUS, y: 0 },
+    { x: -SHIP_RADIUS * 0.7, y: SHIP_RADIUS * 0.6 },
+    { x: -SHIP_RADIUS * 0.7, y: -SHIP_RADIUS * 0.6 },
+  ];
+
   // --- Ship state ---
   const ship = {
     x: 0, y: 0, vx: 0, vy: 0,
@@ -43,7 +49,7 @@ export function createGame(canvas) {
     angularVel: ANGULAR_VEL,
     state: "rotating",
     thrustDir: 0,
-    score: 0,
+    score: 0,       // legacy; no longer used for logic
     alive: true,
   };
 
@@ -112,7 +118,14 @@ export function createGame(canvas) {
   let energy = 1.0;
   let lives = 2; // extra lives (3 total: current + 2 icons)
   let energyDisplay = energy; // smoothed energy for HUD
-  let scoreDisplay = 0;       // smoothed score for HUD (warp)
+
+  // warpScore = points accumulated toward warp threshold this level
+  let warpScore = 0;
+  let scoreDisplay = 0;       // smoothed warpScore for HUD bar
+
+  // global run score (doesn't reset between levels)
+  let score = 0;
+
   let fragments = [];
   let respawnPending = false;
   let respawnCheckTimer = 0.0;
@@ -172,7 +185,10 @@ export function createGame(canvas) {
     ship.state = "rotating";
     ship.thrustDir = ship.angle;
     ship.alive = true;
-    ship.score = 0;
+
+    // Do NOT reset global score between levels
+    warpScore = 0;
+    scoreDisplay = warpScore;
 
     spawnTimer = 0;
     healthSpawnTimer = 0;
@@ -183,7 +199,6 @@ export function createGame(canvas) {
     wormholeActive = false;
     wormhole = null;
     bodies = [];
-    scoreDisplay = ship.score;
   }
 
   function hardRestartGame() {
@@ -191,7 +206,12 @@ export function createGame(canvas) {
     lives = 2;
     energy = 1.0;
     energyDisplay = energy;
+
+    // New run: reset both global score and warp
+    score = 0;
+    warpScore = 0;
     scoreDisplay = 0;
+
     resetShipForLevel();
     phase = 'start';
     gameOverTimer = 0;
@@ -317,8 +337,6 @@ export function createGame(canvas) {
       if (ship.angle > Math.PI) ship.angle -= TWO_PI;
     }
 
-    applyAttraction(dt);
-
     ship.x += ship.vx * dt;
     ship.y += ship.vy * dt;
 
@@ -413,6 +431,71 @@ export function createGame(canvas) {
     }
   }
 
+  // --- Triangle helpers for ship hitbox ---
+  function pointInTriangle(px, py, a, b, c) {
+    const v0x = c.x - a.x, v0y = c.y - a.y;
+    const v1x = b.x - a.x, v1y = b.y - a.y;
+    const v2x = px - a.x, v2y = py - a.y;
+
+    const dot00 = v0x * v0x + v0y * v0y;
+    const dot01 = v0x * v1x + v0y * v1y;
+    const dot02 = v0x * v2x + v0y * v2y;
+    const dot11 = v1x * v1x + v1y * v1y;
+    const dot12 = v1x * v2x + v1y * v2y;
+
+    const denom = dot00 * dot11 - dot01 * dot01;
+    if (denom === 0) return false;
+    const invDenom = 1 / denom;
+    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+    return u >= 0 && v >= 0 && u + v <= 1;
+  }
+
+  function closestPointOnSegment(px, py, ax, ay, bx, by) {
+    const vx = bx - ax;
+    const vy = by - ay;
+    const wx = px - ax;
+    const wy = py - ay;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+    return {
+      x: ax + t * vx,
+      y: ay + t * vy,
+    };
+  }
+
+  function circleHitsShip(bx, by, br) {
+    // Transform circle center into ship-local coords (inverse rotate+translate)
+    const angle = (ship.state === "thrusting") ? ship.thrustDir : ship.angle;
+    const cosA = Math.cos(-angle);
+    const sinA = Math.sin(-angle);
+    const relX = bx - ship.x;
+    const relY = by - ship.y;
+    const lx = cosA * relX - sinA * relY;
+    const ly = sinA * relX + cosA * relY;
+
+    const a = SHIP_TRI_LOCAL[0];
+    const b = SHIP_TRI_LOCAL[1];
+    const c = SHIP_TRI_LOCAL[2];
+
+    // 1) If center is inside triangle, we collide
+    if (pointInTriangle(lx, ly, a, b, c)) return true;
+
+    // 2) Check distance to each edge
+    const r2 = br * br;
+    const edges = [[a, b], [b, c], [c, a]];
+    for (const [p, q] of edges) {
+      const cp = closestPointOnSegment(lx, ly, p.x, p.y, q.x, q.y);
+      const dx = lx - cp.x;
+      const dy = ly - cp.y;
+      if (dx * dx + dy * dy <= r2) return true;
+    }
+
+    return false;
+  }
+
   // --- Explosion / respawn / lives ---
   function triggerExplosion() {
     if (!ship.alive) return;
@@ -432,9 +515,9 @@ export function createGame(canvas) {
       });
     }
 
-    // Update hi-score if beaten
-    if (ship.score > hiScore) {
-      hiScore = ship.score;
+    // Update hi-score if beaten (based on global score)
+    if (score > hiScore) {
+      hiScore = score;
       try {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('nebula_hi_score', String(Math.floor(hiScore)));
@@ -527,58 +610,81 @@ export function createGame(canvas) {
     // Ship vs bodies
     for (let i = bodies.length - 1; i >= 0; i--) {
       const b = bodies[i];
-      const minDist = SHIP_RADIUS + b.radius;
-      if (dist2(ship.x, ship.y, b.x, b.y) <= minDist * minDist) {
-        if (invulnTimer > 0 || !ship.alive || phase !== 'playing') continue;
 
-        if (b.type === "coin") {
-          ship.score += 10;
+      // Broad-phase: bounding circle test
+      const approxR = SHIP_RADIUS;
+      const minDist = approxR + b.radius;
+      if (dist2(ship.x, ship.y, b.x, b.y) > minDist * minDist) continue;
 
-          // Coin impulse towards ship direction
-          const dx = ship.x - b.x;
-          const dy = ship.y - b.y;
-          const d = Math.sqrt(dx * dx + dy * dy) || 1;
-          const ux = dx / d, uy = dy / d;
-          ship.vx += ux * COIN_IMPULSE;
-          ship.vy += uy * COIN_IMPULSE;
+      // Precise: circle vs ship triangle
+      if (!circleHitsShip(b.x, b.y, b.radius)) continue;
 
-          bodies.splice(i, 1);
-        } else if (b.type === 'health') {
-          // Health pickup: boost energy by 0.2–0.3, clamp to 1.0
-          const delta = 0.2 + Math.random() * 0.1;
-          energy = clamp(energy + delta, 0, 1);
+      if (invulnTimer > 0 || !ship.alive || phase !== 'playing') continue;
 
-          // trigger blue heal flash (double flash handled in render)
-          healFlashTimer = HEAL_FLASH_TOTAL;
+      if (b.type === "coin") {
+        // Warp gain
+        warpScore += 10;
 
-          bodies.splice(i, 1);
-        } else {
-          // Enemy hit (hazard / hazard_elite)
-          bodies.splice(i, 1);
-          energy -= ENEMY_DAMAGE;
-          if (energy <= 0 && ship.alive) {
-            energy = 0;
-            triggerExplosion();
-          }
-          // mild knockback
-          ship.vx *= -0.4;
-          ship.vy *= -0.4;
-          hitFlashTimer = 0.1;
-          break;
+        // Score: gold = 100
+        score += 100;
+
+        // Coin impulse towards ship direction
+        const dx = ship.x - b.x;
+        const dy = ship.y - b.y;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const ux = dx / d, uy = dy / d;
+        ship.vx += ux * COIN_IMPULSE;
+        ship.vy += uy * COIN_IMPULSE;
+
+        bodies.splice(i, 1);
+      } else if (b.type === 'health') {
+        // Health pickup: boost energy by 0.2–0.3, clamp to 1.0
+        const delta = 0.2 + Math.random() * 0.1;
+        energy = clamp(energy + delta, 0, 1);
+
+        // Score: 200–300 (1000 * delta), rounded to nearest 10
+        let healthScore = Math.round((delta * 1000) / 10) * 10;
+        score += healthScore;
+
+        // trigger blue heal flash (double flash handled in render)
+        healFlashTimer = HEAL_FLASH_TOTAL;
+
+        bodies.splice(i, 1);
+      } else {
+        // Enemy hit (hazard / hazard_elite)
+        bodies.splice(i, 1);
+        energy -= ENEMY_DAMAGE;
+        if (energy <= 0 && ship.alive) {
+          energy = 0;
+          triggerExplosion();
         }
+        // mild knockback
+        ship.vx *= -0.4;
+        ship.vy *= -0.4;
+        hitFlashTimer = 0.1;
+        break;
       }
     }
 
-    // Remove offscreen bodies (hazards score +25 when slung off-screen)
+    // Remove offscreen bodies (hazards score when slung off-screen)
     const M = 8;
     const left = -M, top = -M;
     const right = W() + M, bottom = H() + M;
     const kept = [];
     for (const b of bodies) {
       const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
-      if (inside) kept.push(b);
-      else if (b.type === 'hazard' || b.type === 'hazard_elite') {
-        ship.score += 25;
+      if (inside) {
+        kept.push(b);
+      } else if (b.type === 'hazard' || b.type === 'hazard_elite') {
+        // Warp gain for slingshot
+        warpScore += 25;
+
+        // Score: red vs green
+        if (b.type === 'hazard') {
+          score += 250;    // red
+        } else {
+          score += 500;    // green elite
+        }
       }
       // coins/health going off-screen just vanish
     }
@@ -776,6 +882,7 @@ export function createGame(canvas) {
       spawnHealthPickup();
     }
 
+    applyAttraction(dt);
     integrate(dt);
     handleBodyMerges();
     handleHealthHazardCollisions();
@@ -784,17 +891,17 @@ export function createGame(canvas) {
     healFlashTimer = Math.max(0, healFlashTimer - dt);
     handleCollisions();
 
-    if (!wormholeActive && ship.score >= scoreGoal) spawnWormhole();
+    if (!wormholeActive && warpScore >= scoreGoal) spawnWormhole();
     updateWormhole(dt);
 
     updateFragments(dt);
     tryRespawn(dt);
 
-    // Smooth energy/score HUD values (warp uses ship.score)
+    // Smooth energy/warp HUD values
     const lerpSpeed = 10; // higher = snappier
     const f = Math.min(1, lerpSpeed * dt);
     energyDisplay += (energy - energyDisplay) * f;
-    scoreDisplay += (ship.score - scoreDisplay) * f;
+    scoreDisplay += (warpScore - scoreDisplay) * f;
   }
 
   // --- Render ---
@@ -885,7 +992,7 @@ export function createGame(canvas) {
     const totalW = w - padding * 2 - gap;
     const halfW = totalW * 0.5;
 
-    // Reduce bar height to 75% (was 16)
+    // Reduced bar height
     const barH = 12;
     const topY = 32;
 
@@ -906,7 +1013,7 @@ export function createGame(canvas) {
       ctx.fillText('⚡ Energy', x, y - 2);
     }
 
-    // Score (numeric, in place where lives used to be — top-right of HUD)
+    // Score (numeric, top-right)
     {
       const scoreX = w - padding;
       const scoreY = topY - 2; // aligned above warp bar
@@ -914,11 +1021,11 @@ export function createGame(canvas) {
       ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'bottom';
-      const scoreText = String(Math.floor(ship.score)).padStart(1, '0'); // room up to 99,999,999
+      const scoreText = String(Math.floor(score)).padStart(1, '0'); // room up to 99,999,999
       ctx.fillText(scoreText, scoreX, scoreY);
     }
 
-    // Score/Warp bar (right)
+    // Warp bar (right) – based on warpScore
     {
       const x = padding + halfW + gap;
       const y = topY;
@@ -1099,7 +1206,7 @@ export function createGame(canvas) {
 
       // Show final score & hi-score
       ctx.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText(`Score: ${Math.floor(ship.score)}`, w * 0.5, h * 0.4 + 40);
+      ctx.fillText(`Score: ${Math.floor(score)}`, w * 0.5, h * 0.4 + 40);
       ctx.fillText(`Best: ${Math.floor(hiScore)}`, w * 0.5, h * 0.4 + 70);
 
       if (gameOverTimer >= 1.0) {
