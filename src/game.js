@@ -5,7 +5,10 @@ export function createGame(canvas) {
   // --- Constants ---
   const TWO_PI = Math.PI * 2;
   const SHIP_RADIUS = 14;
-  const HUD_SAFE_BOTTOM = 64; // bottom of HUD/UI zone (no ship / spawns above this)
+
+  // HUD_SAFE_BOTTOM: bottom of HUD/UI zone (no ship / spawns above this)
+  // We reduced bar height by 25% (16 -> 12), so shrink this from 64 to 60
+  const HUD_SAFE_BOTTOM = 64;
 
   const COIN_IMPULSE = 28;       // how strongly a collected coin nudges the ship
   const ENEMY_DAMAGE = 0.14;     // how much energy one enemy hit removes
@@ -26,7 +29,12 @@ export function createGame(canvas) {
   const HEALTH_RADIUS = 10; // size only; spawn interval is per-level
   const HEALTH_SPEED = 40;
   const HEALTH_ATTRACT_MULT = 0.75; // 25% less attraction than default
-  const DEFAULT_HEALTH_FREQUENCY = Math.floor(Math.random() * 20) + 20;
+
+  // Previously ~20–40s; now push it ~20s later on average: ~40–60s
+  const DEFAULT_HEALTH_FREQUENCY = Math.floor(Math.random() * 20) + 40;
+
+  // Heal flash timing (for double flash)
+  const HEAL_FLASH_TOTAL = 0.25; // total duration of double flash
 
   // --- Ship state ---
   const ship = {
@@ -56,7 +64,7 @@ export function createGame(canvas) {
     {
       scoreGoal: 200,
       coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // between 30–60s
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // (not used yet)
       typeBoost: {
         coin: { grav: 1.0, speed: 1.0 },
         hazard: { grav: 1.0, speed: 1.0 },
@@ -82,15 +90,6 @@ export function createGame(canvas) {
         hazard: { grav: 1.22, speed: 1.22 },
         elite: { grav: 1.22, speed: 1.22 },
       },
-    },    {
-      scoreGoal: 350,
-      coinHazardSpawnRatio: 0.6,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
-      typeBoost: {
-        coin: { grav: 1.35, speed: 1.35 },
-        hazard: { grav: 1.35, speed: 1.35 },
-        elite: { grav: 1.35, speed: 1.35 },
-      },
     },
   ];
   let levelIndex = 0;
@@ -113,14 +112,28 @@ export function createGame(canvas) {
   let energy = 1.0;
   let lives = 2; // extra lives (3 total: current + 2 icons)
   let energyDisplay = energy; // smoothed energy for HUD
-  let scoreDisplay = 0;       // smoothed score for HUD
+  let scoreDisplay = 0;       // smoothed score for HUD (warp)
   let fragments = [];
   let respawnPending = false;
   let respawnCheckTimer = 0.0;
   let invulnTimer = 0.0;
   let respawnCooldown = 0.0;
   let hitFlashTimer = 0.0;
-  let healFlashTimer = 0.0;   // new: blue flash for health pickup
+  let healFlashTimer = 0.0;
+
+  // --- Hi-score (local, per device for now) ---
+  let hiScore = 0;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('nebula_hi_score');
+      if (saved) {
+        const n = parseInt(saved, 10);
+        if (!Number.isNaN(n)) hiScore = n;
+      }
+    }
+  } catch (e) {
+    // ignore storage errors
+  }
 
   // --- Game over state ---
   let gameOverTimer = 0.0;
@@ -419,6 +432,18 @@ export function createGame(canvas) {
       });
     }
 
+    // Update hi-score if beaten
+    if (ship.score > hiScore) {
+      hiScore = ship.score;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('nebula_hi_score', String(Math.floor(hiScore)));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
     if (lives > 0) {
       // Consume a life and respawn
       lives -= 1;
@@ -523,8 +548,8 @@ export function createGame(canvas) {
           const delta = 0.2 + Math.random() * 0.1;
           energy = clamp(energy + delta, 0, 1);
 
-          // trigger blue heal flash
-          healFlashTimer = 0.1;
+          // trigger blue heal flash (double flash handled in render)
+          healFlashTimer = HEAL_FLASH_TOTAL;
 
           bodies.splice(i, 1);
         } else {
@@ -744,11 +769,9 @@ export function createGame(canvas) {
       spawnBody();
     }
 
-    // Independent health spawns (per-level configurable)
-    const levelCfg = levels[levelIndex] || levels[0];
-    const healthInterval = DEFAULT_HEALTH_FREQUENCY; // or levelCfg.healthSpawnInterval
+    // Independent health spawns (using global default for now)
     healthSpawnTimer += dt;
-    if (healthSpawnTimer >= healthInterval) {
+    if (healthSpawnTimer >= DEFAULT_HEALTH_FREQUENCY) {
       healthSpawnTimer = 0;
       spawnHealthPickup();
     }
@@ -767,7 +790,7 @@ export function createGame(canvas) {
     updateFragments(dt);
     tryRespawn(dt);
 
-    // Smooth energy/score HUD values
+    // Smooth energy/score HUD values (warp uses ship.score)
     const lerpSpeed = 10; // higher = snappier
     const f = Math.min(1, lerpSpeed * dt);
     energyDisplay += (energy - energyDisplay) * f;
@@ -856,12 +879,14 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
-    // HUD: Energy & Score
+    // HUD: Energy & Score/Warp/Lives
     const padding = 12;
     const gap = 8;
     const totalW = w - padding * 2 - gap;
     const halfW = totalW * 0.5;
-    const barH = 16;
+
+    // Reduce bar height to 75% (was 16)
+    const barH = 12;
     const topY = 32;
 
     // Energy
@@ -875,13 +900,25 @@ export function createGame(canvas) {
       ctx.strokeStyle = '#666';
       ctx.strokeRect(x, y, halfW, barH);
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.font = 'bold 12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText('⚡ Energy', x, y - 2);
     }
 
-    // Score
+    // Score (numeric, in place where lives used to be — top-right of HUD)
+    {
+      const scoreX = w - padding;
+      const scoreY = topY - 2; // aligned above warp bar
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      const scoreText = String(Math.floor(ship.score)).padStart(1, '0'); // room up to 99,999,999
+      ctx.fillText(scoreText, scoreX, scoreY);
+    }
+
+    // Score/Warp bar (right)
     {
       const x = padding + halfW + gap;
       const y = topY;
@@ -893,17 +930,18 @@ export function createGame(canvas) {
       ctx.strokeStyle = '#666';
       ctx.strokeRect(x, y, halfW, barH);
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.font = 'bold 12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
       ctx.fillText('🪙 Warp drive', x, y - 2);
     }
 
-    // Lives (mini ships, top-right)
+    // Lives (mini ships) moved to top-right of ENERGY area
     {
       const lifeRadius = 8;
       const lifeGap = 6;
-      let lx = w - padding - lifeRadius;
+      const energyRightX = padding + halfW;
+      let lx = energyRightX - lifeRadius;
       const ly = topY - 10;
 
       ctx.save();
@@ -937,13 +975,21 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
-    // Heal flash when collecting health (soft blue)
+    // Heal flash when collecting health (double blue flash)
     if (healFlashTimer > 0) {
-      const alpha = Math.min(0.5, (healFlashTimer / 0.1) * 0.5);
-      ctx.save();
-      ctx.fillStyle = `rgba(90,180,255,${alpha})`;
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
+      const t = 1 - (healFlashTimer / HEAL_FLASH_TOTAL); // 0 -> 1 over duration
+      // Two quick flashes: one early, one mid
+      const flashOn =
+        (t >= 0.0 && t < 0.15) ||   // first flash
+        (t >= 0.25 && t < 0.4);     // second flash
+
+      if (flashOn) {
+        const alpha = 0.5;
+        ctx.save();
+        ctx.fillStyle = `rgba(90,180,255,${alpha})`;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+      }
     }
 
     // --- Overlays ---
@@ -969,11 +1015,11 @@ export function createGame(canvas) {
       ctx.fillStyle = 'rgba(253, 255, 208, 1)';
       ctx.textAlign = 'center';
 
-      // Shorter title for mobile
+      // Title
       ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.fillText('Nebula', w * 0.5, py + 60);
 
-      // Shorter, mobile-friendly instructions
+      // Instructions
       ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       const lines = [
         'Hold anywhere on the screen to thrust.',
@@ -998,7 +1044,6 @@ export function createGame(canvas) {
       startBtn.h = 56;
       startBtn.x = w * 0.5 - startBtn.w / 2;
       startBtn.y = py + panelH - 100;
-      ctx.color = '#FFC107';
       ctx.fillStyle = '#16c784';
       ctx.fillRect(startBtn.x, startBtn.y, startBtn.w, startBtn.h);
       ctx.strokeStyle = '#c8ffe6';
@@ -1050,7 +1095,12 @@ export function createGame(canvas) {
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Game Over', w * 0.5, h * 0.45);
+      ctx.fillText('Game Over', w * 0.5, h * 0.4);
+
+      // Show final score & hi-score
+      ctx.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillText(`Score: ${Math.floor(ship.score)}`, w * 0.5, h * 0.4 + 40);
+      ctx.fillText(`Best: ${Math.floor(hiScore)}`, w * 0.5, h * 0.4 + 70);
 
       if (gameOverTimer >= 1.0) {
         restartBtn.w = 220;
