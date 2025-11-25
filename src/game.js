@@ -499,6 +499,11 @@ export function createGame(canvas) {
   // --- Explosion / respawn / lives ---
   function triggerExplosion() {
     if (!ship.alive) return;
+
+    // Ensure energy and bar are visually zero when exploding
+    energy = 0;
+    energyDisplay = 0;
+
     ship.alive = false;
     fragments = [];
     const pieces = 8;
@@ -657,11 +662,12 @@ export function createGame(canvas) {
         if (energy <= 0 && ship.alive) {
           energy = 0;
           triggerExplosion();
+        } else {
+          // mild knockback when not dead
+          ship.vx *= -0.4;
+          ship.vy *= -0.4;
+          hitFlashTimer = 0.1;
         }
-        // mild knockback
-        ship.vx *= -0.4;
-        ship.vy *= -0.4;
-        hitFlashTimer = 0.1;
         break;
       }
     }
@@ -709,7 +715,7 @@ export function createGame(canvas) {
 
   function updateWormhole(dt) {
     if (!wormholeActive || !wormhole) return;
-    wormhole.angle += dt * 1.2;
+    wormhole.angle += dt * 1.2; // used as phase for ripples too
     const dx = wormhole.x - ship.x;
     const dy = wormhole.y - ship.y;
     const d2 = dx * dx + dy * dy;
@@ -729,21 +735,30 @@ export function createGame(canvas) {
     if (!wormholeActive || !wormhole) return;
     ctx.save();
     ctx.translate(wormhole.x, wormhole.y);
-    ctx.rotate(wormhole.angle);
-    ctx.beginPath();
-    ctx.arc(0, 0, wormhole.radius, 0, TWO_PI);
-    ctx.strokeStyle = '#88aaff';
-    ctx.lineWidth = 3;
-    ctx.stroke();
 
-    ctx.beginPath();
-    for (let i = 0; i < 3; i++) {
-      const a0 = i * (TWO_PI / 3);
-      ctx.arc(0, 0, wormhole.radius - 6, a0, a0 + Math.PI * 0.6);
+    const baseR = wormhole.radius;
+    const t = wormhole.angle;
+
+    // Make the ripple feel like it affects the background: use additive-like blending
+    const prevComp = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+
+    const rippleCount = 4;
+    for (let i = 0; i < rippleCount; i++) {
+      const phase = t * 2.2 + i * 0.8;
+      const pulsate = Math.sin(phase) * 4;
+      const r = baseR + i * 10 + pulsate;
+      const alpha = 0.45 - i * 0.08;
+      if (alpha <= 0) continue;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, TWO_PI);
+      ctx.strokeStyle = `rgba(120,180,255,${alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
-    ctx.strokeStyle = '#cfe8ff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+
+    ctx.globalCompositeOperation = prevComp;
     ctx.restore();
   }
 
@@ -922,9 +937,10 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
-    // Wormhole + bodies + fragments
+    // Wormhole ripple (behind bodies, over background)
     renderWormhole(ctx);
 
+    // Bodies
     for (const b of bodies) {
       if (b.type === 'health') {
         // White circle with red cross
