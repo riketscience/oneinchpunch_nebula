@@ -11,6 +11,7 @@ export function createGame(canvas) {
 
   const COIN_IMPULSE = 28;       // how strongly a collected coin nudges the ship
   const ENEMY_DAMAGE = 0.14;     // how much energy one enemy hit removes
+  const BUMP_DAMAGE = 0.02;     // how much energy one enemy hit removes
   const SHIP_THRUST = 180;
   const SHIP_DRAG = 0.98;
   const ROT_PERIOD = 1.2;
@@ -34,6 +35,22 @@ export function createGame(canvas) {
 
   // Heal flash timing (for double flash)
   const HEAL_FLASH_TOTAL = 0.25; // total duration of double flash
+
+  // Level start quotes
+  const levelStartQuotes = [
+    'Are you ready...',
+    'Break a leg...',
+    'Time to kick ass...',
+    'Let\'s do this...',
+    'Watch and learn...',
+    'Brace yourselves...',
+    'Show \'em how it\'s done...',
+    'Let\'s make it look easy...',
+    'Piece o\' cake',
+    'Here we go...',
+    'You got this....',
+    'Y\'all ready for this...'
+  ];
 
   // Ship collision triangle in local ship coordinates (approx)
   const SHIP_TRI_LOCAL = [
@@ -79,7 +96,7 @@ export function createGame(canvas) {
     },
     {
       scoreGoal: 250,
-      coinHazardSpawnRatio: 0.7,
+      coinHazardSpawnRatio: 0.66,
       healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
       typeBoost: {
         coin: { grav: 1.1, speed: 1.1 },
@@ -89,12 +106,42 @@ export function createGame(canvas) {
     },
     {
       scoreGoal: 300,
-      coinHazardSpawnRatio: 0.7,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
+      coinHazardSpawnRatio: 0.62,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
       typeBoost: {
         coin: { grav: 1.22, speed: 1.22 },
         hazard: { grav: 1.22, speed: 1.22 },
         elite: { grav: 1.22, speed: 1.22 },
+      },
+    },
+    {
+      scoreGoal: 350,
+      coinHazardSpawnRatio: 0.58,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
+      typeBoost: {
+        coin: { grav: 1.34, speed: 1.34 },
+        hazard: { grav: 1.34, speed: 1.34 },
+        elite: { grav: 1.34, speed: 1.34 },
+      },
+    },
+    {
+      scoreGoal: 400,
+      coinHazardSpawnRatio: 0.54,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
+      typeBoost: {
+        coin: { grav: 1.45, speed: 1.45 },
+        hazard: { grav: 1.45, speed: 1.45 },
+        elite: { grav: 1.45, speed: 1.45 },
+      },
+    },
+    {
+      scoreGoal: 450,
+      coinHazardSpawnRatio: 0.5,
+      healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
+      typeBoost: {
+        coin: { grav: 1.5, speed: 1.5 },
+        hazard: { grav: 1.5, speed: 1.5 },
+        elite: { grav: 1.5, speed: 1.5 },
       },
     },
   ];
@@ -103,6 +150,7 @@ export function createGame(canvas) {
 
   // --- Phase ---
   // 'start'        → title/instructions overlay
+  // 'startCountdown' → 3..2..1 + quote after start button
   // 'playing'      → normal game
   // 'captured'     → being pulled into vortex
   // 'betweenLevels'→ level complete + countdown
@@ -113,6 +161,9 @@ export function createGame(canvas) {
   let betweenStage = 0;
   let betweenFromLevel = 1;
   let betweenToLevel = 2;
+  let currentLevelQuote = '';
+  let startCountdownTimer = 0.0;
+  let startCountdownStage = 0;
 
   // --- Energy, lives, respawn, hit feedback ---
   let energy = 1.0;
@@ -346,10 +397,26 @@ export function createGame(canvas) {
     const maxY = H() - SHIP_RADIUS;
     const BOUNCE_DAMP = 0.95;
 
-    if (ship.x < minX) { ship.x = minX; ship.vx = -ship.vx * BOUNCE_DAMP; }
-    if (ship.x > maxX) { ship.x = maxX; ship.vx = -ship.vx * BOUNCE_DAMP; }
-    if (ship.y < minY) { ship.y = minY; ship.vy = -ship.vy * BOUNCE_DAMP; }
-    if (ship.y > maxY) { ship.y = maxY; ship.vy = -ship.vy * BOUNCE_DAMP; }
+    if (ship.x < minX) {
+      ship.x = minX;
+      ship.vx = -ship.vx * BOUNCE_DAMP;
+      energy = Math.max(0, energy - BUMP_DAMAGE);
+    }
+    if (ship.x > maxX) {
+      ship.x = maxX;
+      ship.vx = -ship.vx * BOUNCE_DAMP;
+      energy = Math.max(0, energy - BUMP_DAMAGE);
+    }
+    if (ship.y < minY) {
+      ship.y = minY;
+      ship.vy = -ship.vy * BOUNCE_DAMP;
+      energy = Math.max(0, energy - BUMP_DAMAGE);
+    }
+    if (ship.y > maxY) {
+      ship.y = maxY;
+      ship.vy = -ship.vy * BOUNCE_DAMP;
+      energy = Math.max(0, energy - BUMP_DAMAGE);
+    }
 
     for (const b of bodies) {
       b.x += b.vx * dt;
@@ -709,7 +776,8 @@ export function createGame(canvas) {
       wy = HUD_SAFE_BOTTOM + vortexPadding / 2;
     }
 
-    wormhole = { x: wx, y: wy, radius: 26, angle: 0 };
+    // reduced radius by ~15% (26 → 22)
+    wormhole = { x: wx, y: wy, radius: 22, angle: 0 };
     wormholeActive = true;
   }
 
@@ -743,13 +811,22 @@ export function createGame(canvas) {
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'lighter';
 
-    const rippleCount = 4;
+    // now 5 rings, with one further inside
+    const rippleCount = 5;
+    const innerOffset = -6; // inner ring slightly inside base radius
+    const step = 8;
+
     for (let i = 0; i < rippleCount; i++) {
       const phase = t * 2.2 + i * 0.8;
       const pulsate = Math.sin(phase) * 4;
-      const r = baseR + i * 10 + pulsate;
-      const alpha = 0.45 - i * 0.08;
-      if (alpha <= 0) continue;
+      const offset = innerOffset + i * step;
+      const r = baseR + offset + pulsate;
+
+      // more opaque towards the outer edges
+      const maxAlpha = 0.55;
+      const minAlpha = 0.18;
+      const alpha = minAlpha + (i / (rippleCount - 1)) * (maxAlpha - minAlpha);
+      if (alpha <= 0 || r <= 0) continue;
 
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TWO_PI);
@@ -777,7 +854,11 @@ export function createGame(canvas) {
         const x = px, y = py;
         if (x >= startBtn.x && x <= startBtn.x + startBtn.w &&
             y >= startBtn.y && y <= startBtn.y + startBtn.h) {
-          phase = 'playing';
+          // Pick a random quote for game start
+          currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
+          phase = 'startCountdown';
+          startCountdownTimer = 0.0;
+          startCountdownStage = 0;
           return;
         }
       }
@@ -812,6 +893,19 @@ export function createGame(canvas) {
   function update(dt) {
     if (phase === 'start') {
       // Just showing title / instructions
+      return;
+    }
+
+    if (phase === 'startCountdown') {
+      startCountdownTimer += dt;
+      if (startCountdownStage === 0 && startCountdownTimer >= 3.0) {
+        startCountdownStage = 1;
+        startCountdownTimer = 0.0;
+      } else if (startCountdownStage === 1 && startCountdownTimer >= 1.5) {
+        phase = 'playing';
+        return;
+      }
+      updateFragments(dt);
       return;
     }
 
@@ -857,6 +951,13 @@ export function createGame(canvas) {
         betweenStage = 0;
         betweenFromLevel = levelIndex + 1;
         betweenToLevel = Math.min(levelIndex + 2, levels.length);
+
+        // Pick a random quote different from the previous one
+        let newQuote;
+        do {
+          newQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
+        } while (newQuote === currentLevelQuote && levelStartQuotes.length > 1);
+        currentLevelQuote = newQuote;
       }
       return;
     }
@@ -872,10 +973,10 @@ export function createGame(canvas) {
       if (betweenStage === 0 && betweenTimer >= 1.5) {
         betweenStage = 1;
         betweenTimer = 0.0;
-      } else if (betweenStage === 1 && betweenTimer >= 1.5) {
+      } else if (betweenStage === 1 && betweenTimer >= 3.0) {
         betweenStage = 2;
         betweenTimer = 0.0;
-      } else if (betweenStage === 2 && betweenTimer >= 3.0) {
+      } else if (betweenStage === 2 && betweenTimer >= 1.5) {
         startNextLevel();
         return;
       }
@@ -1179,6 +1280,34 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
+    // Start countdown overlay (3..2..1 + quote)
+    if (phase === 'startCountdown') {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+
+      if (startCountdownStage === 0) {
+        const total = 3.0;
+        const t = clamp(startCountdownTimer, 0, total);
+        const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
+        const text = String(remaining);
+        const pulse = 1.0 + 0.25 * (1 - (t % 1.0));
+        ctx.save();
+        ctx.translate(w * 0.5, h * 0.5);
+        ctx.scale(pulse, pulse);
+        ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(text, 0, 20);
+        ctx.restore();
+      } else if (startCountdownStage === 1) {
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(currentLevelQuote, w * 0.5, h * 0.45);
+      }
+
+      ctx.restore();
+    }
+
     // Between-level overlay
     if (phase === 'betweenLevels') {
       ctx.save();
@@ -1191,9 +1320,6 @@ export function createGame(canvas) {
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.45);
       } else if (betweenStage === 1) {
-        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillText(`Level ${betweenToLevel} get ready`, w * 0.5, h * 0.45);
-      } else if (betweenStage === 2) {
         const total = 3.0;
         const t = clamp(betweenTimer, 0, total);
         const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
@@ -1205,6 +1331,9 @@ export function createGame(canvas) {
         ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillText(text, 0, 20);
         ctx.restore();
+      } else if (betweenStage === 2) {
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(currentLevelQuote, w * 0.5, h * 0.45);
       }
 
       ctx.restore();
