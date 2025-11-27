@@ -17,7 +17,7 @@ export function createGame(canvas) {
   const ROT_PERIOD = 1.2;
   const ANGULAR_VEL = (TWO_PI / ROT_PERIOD) * 0.95;
   const ATTRACT_RADIUS = 220;    // base attract radius; coins use 75% of this visually
-  const GRAVITY_K = 160;
+  const GRAVITY_K = 180;
   const SHIP_GRAVITY_FACTOR = 0.25;
   const MAX_BODIES = 40;
   const SPAWN_INTERVAL = 2.4;
@@ -359,7 +359,7 @@ export function createGame(canvas) {
       y,
       vx: dx * HEALTH_SPEED,
       vy: dy * HEALTH_SPEED,
-      gravMult: 1.3,
+      gravMult: 1.0,
       attractMul: HEALTH_ATTRACT_MULT, // 25% weaker attraction
       speedMul: 1.0,
       spawnTime: 0.0,  // animation timer (0 to 0.8s)
