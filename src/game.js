@@ -191,6 +191,7 @@ export function createGame(canvas) {
   let invulnTimer = 0.0;
   let respawnCooldown = 0.0;
   let hitFlashTimer = 0.0;
+  let hitFlashColor = 'rgba(255,60,60,'; // default red, can be green for elite
   let healFlashTimer = 0.0;
 
   // --- Hi-score (local, per device for now) ---
@@ -751,8 +752,16 @@ export function createGame(canvas) {
         bodies.splice(i, 1);
       } else {
         // Enemy hit (hazard / hazard_elite)
+        const isElite = b.type === 'hazard_elite';
         bodies.splice(i, 1);
-        energy -= ENEMY_DAMAGE;
+
+        // Green elite deals double damage
+        energy -= isElite ? (ENEMY_DAMAGE * 2) : ENEMY_DAMAGE;
+
+        // Set flash color based on enemy type
+        hitFlashColor = isElite ? 'rgba(0,255,102,' : 'rgba(255,60,60,';
+        hitFlashTimer = 0.1;
+
         if (energy <= 0 && ship.alive) {
           energy = 0;
           triggerExplosion();
@@ -760,7 +769,6 @@ export function createGame(canvas) {
           // mild knockback when not dead
           ship.vx *= -0.4;
           ship.vy *= -0.4;
-          hitFlashTimer = 0.1;
         }
         break;
       }
@@ -778,14 +786,13 @@ export function createGame(canvas) {
       } else if (b.type === 'hazard' || b.type === 'hazard_elite') {
         // Only award points if score is not locked (not during wormhole capture)
         if (!scoreLocked) {
-          // Warp gain for slingshot
-          warpScore += 25;
-
-          // Score: red vs green
+          // Green elite awards double points for slingshot
           if (b.type === 'hazard') {
-            score += 250;    // red
+            warpScore += 25;   // red
+            score += 250;      // red
           } else {
-            score += 500;    // green elite
+            warpScore += 50;   // green elite (double)
+            score += 500;      // green elite (double)
           }
         }
       }
@@ -1029,18 +1036,28 @@ export function createGame(canvas) {
         betweenStage = 3;
         betweenTimer = 0.0;
       }
-      // Stage 3: Pause before countdown (0.5s)
+      // Stage 3: Pause after score animation (0.5s)
       else if (betweenStage === 3 && betweenTimer >= 0.5) {
         betweenStage = 4;
         betweenTimer = 0.0;
       }
-      // Stage 4: Countdown 3..2..1 (3.0s)
-      else if (betweenStage === 4 && betweenTimer >= 3.0) {
+      // Stage 4: Pause before fade (0.6s)
+      else if (betweenStage === 4 && betweenTimer >= 0.6) {
         betweenStage = 5;
         betweenTimer = 0.0;
       }
-      // Stage 5: Quote (1.5s)
-      else if (betweenStage === 5 && betweenTimer >= 1.5) {
+      // Stage 5: Fade out and shrink score (0.2s)
+      else if (betweenStage === 5 && betweenTimer >= 0.2) {
+        betweenStage = 6;
+        betweenTimer = 0.0;
+      }
+      // Stage 6: Countdown 3..2..1 (3.0s)
+      else if (betweenStage === 6 && betweenTimer >= 3.0) {
+        betweenStage = 7;
+        betweenTimer = 0.0;
+      }
+      // Stage 7: Quote (1.5s)
+      else if (betweenStage === 7 && betweenTimer >= 1.5) {
         startNextLevel();
         return;
       }
@@ -1296,11 +1313,11 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
-    // Hit flash when taking damage (red)
+    // Hit flash when taking damage (red for hazard, green for elite)
     if (hitFlashTimer > 0) {
       const alpha = Math.min(0.4, (hitFlashTimer / 0.1) * 0.4);
       ctx.save();
-      ctx.fillStyle = `rgba(255,60,60,${alpha})`;
+      ctx.fillStyle = `${hitFlashColor}${alpha})`;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
     }
@@ -1453,7 +1470,7 @@ export function createGame(canvas) {
         ctx.fillStyle = '#fff';
         ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
       }
-      // Stage 3: Pause (same as stage 2, just waiting)
+      // Stage 3: Pause after score animation (same as stage 2)
       else if (betweenStage === 3) {
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
@@ -1466,8 +1483,54 @@ export function createGame(canvas) {
         ctx.fillStyle = '#fff';
         ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
       }
-      // Stage 4: Countdown 3..2..1
+      // Stage 4: Pause before fade (same as stage 3)
       else if (betweenStage === 4) {
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#ffd54a';
+        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
+        // Show final score
+        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
+      }
+      // Stage 5: Fade out and shrink score (0.3s)
+      else if (betweenStage === 5) {
+        const progress = betweenTimer / 0.3; // 0 to 1 over 300ms
+        const fadeAlpha = 1 - progress; // fade from 1 to 0
+        const scale = 1 - progress; // shrink from 1 to 0
+
+        // Fade "Level N complete"
+        ctx.save();
+        ctx.translate(w * 0.5, h * 0.35);
+        ctx.scale(scale, scale);
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = `rgba(255, 255, 255, ${fadeAlpha})`;
+        ctx.fillText(`Level ${betweenFromLevel} complete`, 0, 0);
+        ctx.restore();
+
+        // Fade "BONUS: XXX"
+        ctx.save();
+        ctx.translate(w * 0.5, h * 0.45);
+        ctx.scale(scale, scale);
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = `rgba(255, 213, 74, ${fadeAlpha})`;
+        ctx.fillText(`BONUS: ${levelBonus}`, 0, 0);
+        ctx.restore();
+
+        // Fade and shrink the score
+        ctx.save();
+        ctx.translate(w * 0.5, h * 0.6);
+        ctx.scale(scale, scale);
+        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = `rgba(255, 255, 255, ${fadeAlpha})`;
+        ctx.fillText(String(Math.floor(scoreNumericDisplay)), 0, 0);
+        ctx.restore();
+      }
+      // Stage 6: Countdown 3..2..1
+      else if (betweenStage === 6) {
         const total = 3.0;
         const t = clamp(betweenTimer, 0, total);
         const remaining = Math.max(1, Math.ceil(total - t));
@@ -1481,8 +1544,8 @@ export function createGame(canvas) {
         ctx.fillText(text, 0, 20);
         ctx.restore();
       }
-      // Stage 5: Quote
-      else if (betweenStage === 5) {
+      // Stage 7: Quote
+      else if (betweenStage === 7) {
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
         ctx.fillText(currentLevelQuote, w * 0.5, h * 0.45);
