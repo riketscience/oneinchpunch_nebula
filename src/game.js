@@ -49,7 +49,11 @@ export function createGame(canvas) {
     'Piece o\' cake',
     'Here we go...',
     'You got this....',
-    'Y\'all ready for this...'
+    'Y\'all ready for this...',
+    'Let\'s crush it...',
+    'Let\'s GO!',
+    'Get ready...',
+    'I\'ve said it before & I\'ll say it again',
   ];
 
   // Ship collision triangle in local ship coordinates (approx)
@@ -164,6 +168,8 @@ export function createGame(canvas) {
   let currentLevelQuote = '';
   let startCountdownTimer = 0.0;
   let startCountdownStage = 0;
+  let levelBonus = 0;
+  let bonusApplied = false;
 
   // --- Energy, lives, respawn, hit feedback ---
   let energy = 1.0;
@@ -176,6 +182,8 @@ export function createGame(canvas) {
 
   // global run score (doesn't reset between levels)
   let score = 0;
+  let scoreNumericDisplay = 0; // animated display for numeric score
+  let scoreLocked = false; // prevent score changes during wormhole capture
 
   let fragments = [];
   let respawnPending = false;
@@ -300,7 +308,19 @@ export function createGame(canvas) {
       tries++;
     }
 
-    const body = { type, radius, x, y, vx: 0, vy: 0, gravMult: 1, attractMul: 1, speedMul: 1 };
+    const body = {
+      type,
+      radius,
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      gravMult: 1,
+      attractMul: 1,
+      speedMul: 1,
+      spawnTime: 0.0,  // animation timer (0 to 0.8s)
+      spawnDuration: 0.8  // 800ms spawn animation
+    };
     applyLevelBoost(body);
     bodies.push(body);
   }
@@ -339,9 +359,11 @@ export function createGame(canvas) {
       y,
       vx: dx * HEALTH_SPEED,
       vy: dy * HEALTH_SPEED,
-      gravMult: 1.0,
+      gravMult: 1.3,
       attractMul: HEALTH_ATTRACT_MULT, // 25% weaker attraction
-      speedMul: 1.0
+      speedMul: 1.0,
+      spawnTime: 0.0,  // animation timer (0 to 0.8s)
+      spawnDuration: 0.5  // 800ms spawn animation
     };
 
     console.log('Spawned health pickup at', x, y);
@@ -421,6 +443,11 @@ export function createGame(canvas) {
     for (const b of bodies) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
+
+      // Update spawn animation timer
+      if (b.spawnTime !== undefined && b.spawnTime < b.spawnDuration) {
+        b.spawnTime += dt;
+      }
     }
   }
 
@@ -749,14 +776,17 @@ export function createGame(canvas) {
       if (inside) {
         kept.push(b);
       } else if (b.type === 'hazard' || b.type === 'hazard_elite') {
-        // Warp gain for slingshot
-        warpScore += 25;
+        // Only award points if score is not locked (not during wormhole capture)
+        if (!scoreLocked) {
+          // Warp gain for slingshot
+          warpScore += 25;
 
-        // Score: red vs green
-        if (b.type === 'hazard') {
-          score += 250;    // red
-        } else {
-          score += 500;    // green elite
+          // Score: red vs green
+          if (b.type === 'hazard') {
+            score += 250;    // red
+          } else {
+            score += 500;    // green elite
+          }
         }
       }
       // coins/health going off-screen just vanish
@@ -796,6 +826,7 @@ export function createGame(canvas) {
       phase = 'captured';
       captureTimer = 2.5;
       ship.state = 'rotating';
+      scoreLocked = true; // Lock score during wormhole capture
     }
   }
 
@@ -843,6 +874,7 @@ export function createGame(canvas) {
   function startNextLevel() {
     levelIndex = Math.min(levelIndex + 1, levels.length - 1);
     resetShipForLevel();
+    scoreLocked = false; // Unlock score for new level
     // NOTE: energy does NOT reset between levels
     phase = 'playing';
   }
@@ -952,6 +984,10 @@ export function createGame(canvas) {
         betweenFromLevel = levelIndex + 1;
         betweenToLevel = Math.min(levelIndex + 2, levels.length);
 
+        // Calculate level completion bonus
+        levelBonus = 500 * betweenFromLevel;
+        bonusApplied = false;
+
         // Pick a random quote different from the previous one
         let newQuote;
         do {
@@ -970,17 +1006,63 @@ export function createGame(canvas) {
 
     if (phase === 'betweenLevels') {
       betweenTimer += dt;
-      if (betweenStage === 0 && betweenTimer >= 1.5) {
+
+      // Stage 0: "Level N complete" (0.8s)
+      if (betweenStage === 0 && betweenTimer >= 0.8) {
         betweenStage = 1;
         betweenTimer = 0.0;
-      } else if (betweenStage === 1 && betweenTimer >= 3.0) {
-        betweenStage = 2;
+      }
+      // Stage 1: Show "BONUS: XXX" and apply it immediately (1.5s - show score for 1s before animating)
+      else if (betweenStage === 1) {
+        // Apply bonus to score at the start of stage 1
+        if (!bonusApplied) {
+          score += levelBonus;
+          bonusApplied = true;
+        }
+        if (betweenTimer >= 1.5) {
+          betweenStage = 2;
+          betweenTimer = 0.0;
+        }
+      }
+      // Stage 2: Score animating up (0.5s)
+      else if (betweenStage === 2 && betweenTimer >= 0.5) {
+        betweenStage = 3;
         betweenTimer = 0.0;
-      } else if (betweenStage === 2 && betweenTimer >= 1.5) {
+      }
+      // Stage 3: Pause before countdown (0.5s)
+      else if (betweenStage === 3 && betweenTimer >= 0.5) {
+        betweenStage = 4;
+        betweenTimer = 0.0;
+      }
+      // Stage 4: Countdown 3..2..1 (3.0s)
+      else if (betweenStage === 4 && betweenTimer >= 3.0) {
+        betweenStage = 5;
+        betweenTimer = 0.0;
+      }
+      // Stage 5: Quote (1.5s)
+      else if (betweenStage === 5 && betweenTimer >= 1.5) {
         startNextLevel();
         return;
       }
+
       updateFragments(dt);
+
+      // Animate numeric score during betweenLevels (only after stage 1 completes, i.e., during stage 2+)
+      if (betweenStage >= 2) {
+        const numericScoreDiff = score - scoreNumericDisplay;
+        if (Math.abs(numericScoreDiff) > 0.5) {
+          const scoreIncrementSpeed = 1000; // points per second
+          const maxIncrement = scoreIncrementSpeed * dt;
+          if (numericScoreDiff > 0) {
+            scoreNumericDisplay = Math.min(score, scoreNumericDisplay + maxIncrement);
+          } else {
+            scoreNumericDisplay = Math.max(score, scoreNumericDisplay - maxIncrement);
+          }
+        } else {
+          scoreNumericDisplay = score; // snap to target when close
+        }
+      }
+
       return;
     }
 
@@ -1014,10 +1096,26 @@ export function createGame(canvas) {
     tryRespawn(dt);
 
     // Smooth energy/warp HUD values
-    const lerpSpeed = 10; // higher = snappier
+    const lerpSpeed = 3; // higher = snappier (reduced from 10 for smoother animation)
     const f = Math.min(1, lerpSpeed * dt);
     energyDisplay += (energy - energyDisplay) * f;
+
+    // Warp score bar animation (using same lerp as energy for consistent smoothness)
     scoreDisplay += (warpScore - scoreDisplay) * f;
+
+    // Numeric score display counts up at ~1000 points per second
+    const numericScoreDiff = score - scoreNumericDisplay;
+    if (Math.abs(numericScoreDiff) > 0.5) {
+      const scoreIncrementSpeed = 1000; // points per second
+      const maxIncrement = scoreIncrementSpeed * dt;
+      if (numericScoreDiff > 0) {
+        scoreNumericDisplay = Math.min(score, scoreNumericDisplay + maxIncrement);
+      } else {
+        scoreNumericDisplay = Math.max(score, scoreNumericDisplay - maxIncrement);
+      }
+    } else {
+      scoreNumericDisplay = score; // snap to target when close
+    }
   }
 
   // --- Render ---
@@ -1043,19 +1141,27 @@ export function createGame(canvas) {
 
     // Bodies
     for (const b of bodies) {
+      // Calculate spawn animation scale (1px to full size over 800ms)
+      let renderRadius = b.radius;
+      if (b.spawnTime !== undefined && b.spawnTime < b.spawnDuration) {
+        const progress = b.spawnTime / b.spawnDuration;
+        const minRadius = 1;
+        renderRadius = minRadius + (b.radius - minRadius) * progress;
+      }
+
       if (b.type === 'health') {
         // White circle with red cross
         ctx.save();
         ctx.translate(b.x, b.y);
 
         ctx.beginPath();
-        ctx.arc(0, 0, b.radius, 0, TWO_PI);
+        ctx.arc(0, 0, renderRadius, 0, TWO_PI);
         ctx.fillStyle = '#ffffff';
         ctx.fill();
 
         ctx.fillStyle = '#ff0000';
-        const crossW = b.radius * 0.9;
-        const crossT = b.radius * 0.35;
+        const crossW = renderRadius * 0.9;
+        const crossT = renderRadius * 0.35;
         // vertical bar
         ctx.fillRect(-crossT / 2, -crossW / 2, crossT, crossW);
         // horizontal bar
@@ -1064,7 +1170,7 @@ export function createGame(canvas) {
         ctx.restore();
       } else {
         ctx.beginPath();
-        ctx.arc(b.x, b.y, b.radius, 0, TWO_PI);
+        ctx.arc(b.x, b.y, renderRadius, 0, TWO_PI);
         if (b.type === 'coin') ctx.fillStyle = '#ffd54a';
         else if (b.type === 'hazard_elite') ctx.fillStyle = '#00ff66';
         else ctx.fillStyle = '#ff5252';
@@ -1138,7 +1244,7 @@ export function createGame(canvas) {
       ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'bottom';
-      const scoreText = String(Math.floor(score)).padStart(1, '0'); // room up to 99,999,999
+      const scoreText = String(Math.floor(scoreNumericDisplay)).padStart(1, '0'); // animated count-up
       ctx.fillText(scoreText, scoreX, scoreY);
     }
 
@@ -1316,23 +1422,69 @@ export function createGame(canvas) {
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
 
+      // Stage 0: "Level N complete"
       if (betweenStage === 0) {
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.45);
-      } else if (betweenStage === 1) {
+      }
+      // Stage 1: Show "BONUS: XXX" below "Level N complete"
+      else if (betweenStage === 1) {
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#ffd54a';
+        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
+        // Show score counting up
+        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
+      }
+      // Stage 2: Score counting up (still showing bonus)
+      else if (betweenStage === 2) {
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#ffd54a';
+        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
+        // Show score counting up
+        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
+      }
+      // Stage 3: Pause (same as stage 2, just waiting)
+      else if (betweenStage === 3) {
+        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#ffd54a';
+        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
+        // Show final score
+        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
+      }
+      // Stage 4: Countdown 3..2..1
+      else if (betweenStage === 4) {
         const total = 3.0;
         const t = clamp(betweenTimer, 0, total);
-        const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
+        const remaining = Math.max(1, Math.ceil(total - t));
         const text = String(remaining);
         const pulse = 1.0 + 0.25 * (1 - (t % 1.0));
         ctx.save();
         ctx.translate(w * 0.5, h * 0.5);
         ctx.scale(pulse, pulse);
         ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
         ctx.fillText(text, 0, 20);
         ctx.restore();
-      } else if (betweenStage === 2) {
+      }
+      // Stage 5: Quote
+      else if (betweenStage === 5) {
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillStyle = '#fff';
         ctx.fillText(currentLevelQuote, w * 0.5, h * 0.45);
       }
 
