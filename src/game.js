@@ -5,7 +5,7 @@ export function createGame(canvas) {
   const H = () => canvas.clientHeight;
 
   // test variables
-  const test_EOL = true;
+  const test_EOL = false;
   const test_DEATH = true;
 
   // --- Constants ---
