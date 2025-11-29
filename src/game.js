@@ -1,6 +1,12 @@
+import { submitHighScore, fetchHighScores } from './supabaseClient.js';
+
 export function createGame(canvas) {
   const W = () => canvas.clientWidth;
   const H = () => canvas.clientHeight;
+
+  // test variables
+  const test_EOL = true;
+  const test_DEATH = true;
 
   // --- Constants ---
   const TWO_PI = Math.PI * 2;
@@ -11,7 +17,7 @@ export function createGame(canvas) {
 
   const COIN_IMPULSE = 28;       // how strongly a collected coin nudges the ship
   const ENEMY_DAMAGE = 0.14;     // how much energy one enemy hit removes
-  const BUMP_DAMAGE = 0.02;     // how much energy one enemy hit removes
+  const BUMP_DAMAGE = 0.02;      // how much energy one bump with wall removes
   const SHIP_THRUST = 180;
   const SHIP_DRAG = 0.98;
   const ROT_PERIOD = 1.2;
@@ -43,17 +49,17 @@ export function createGame(canvas) {
     'Time to kick ass...',
     'Let\'s do this...',
     'Watch and learn...',
-    'Brace yourselves...',
+    'Brace yourself...',
     'Show \'em how it\'s done...',
     'Let\'s make it look easy...',
-    'Piece o\' cake',
+    'Piece o\' cake...',
     'Here we go...',
     'You got this....',
     'Y\'all ready for this...',
     'Let\'s crush it...',
     'Let\'s GO!',
     'Get ready...',
-    'I\'ve said it before & I\'ll say it again',
+    'I\'ve said it before & I\'ll say it again...',
   ];
 
   // Ship collision triangle in local ship coordinates (approx)
@@ -89,7 +95,7 @@ export function createGame(canvas) {
   // --- Levels ---
   const levels = [
     {
-      scoreGoal: 200,
+      scoreGoal: test_EOL ? 25 : 200,
       coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
       healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // (not used yet)
       typeBoost: {
@@ -169,11 +175,12 @@ export function createGame(canvas) {
   let startCountdownTimer = 0.0;
   let startCountdownStage = 0;
   let levelBonus = 0;
+  let bonusDisplay = 0; // animated bonus countdown (starts at levelBonus, goes to 0)
   let bonusApplied = false;
 
   // --- Energy, lives, respawn, hit feedback ---
-  let energy = 1.0;
-  let lives = 2; // extra lives (3 total: current + 2 icons)
+  let energy = !test_DEATH ? 1.0 : 0.3;
+  let lives = !test_DEATH ? 2 : 0; // extra lives (3 total: current + 2 icons)
   let energyDisplay = energy; // smoothed energy for HUD
 
   // warpScore = points accumulated toward warp threshold this level
@@ -194,28 +201,25 @@ export function createGame(canvas) {
   let hitFlashColor = 'rgba(255,60,60,'; // default red, can be green for elite
   let healFlashTimer = 0.0;
 
-  // --- Hi-score (local, per device for now) ---
-  let hiScore = 0;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const saved = localStorage.getItem('nebula_hi_score');
-      if (saved) {
-        const n = parseInt(saved, 10);
-        if (!Number.isNaN(n)) hiScore = n;
-      }
-    }
-  } catch (e) {
-    // ignore storage errors
-  }
-
   // --- Game over state ---
   let gameOverTimer = 0.0;
   const restartBtn = { x: 0, y: 0, w: 220, h: 48 };
   const startBtn = { x: 0, y: 0, w: 240, h: 56 };
 
+  // --- High score entry state ---
+  let showNameEntry = false;
+  let playerName = '';
+  let cursorBlink = 0.0;
+  const submitNameBtn = { x: 0, y: 0, w: 180, h: 44 };
+  const skipBtn = { x: 0, y: 0, w: 140, h: 44 };
+
   // --- Wormhole state ---
   let wormhole = null;
   let wormholeActive = false;
+
+  // --- Online high scores ---
+  let highScores = [];        // fetched from Supabase
+  let scoreSubmitted = false; // avoid multiple submits per run
 
   // --- Helpers ---
   function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
@@ -261,20 +265,66 @@ export function createGame(canvas) {
     bodies = [];
   }
 
+  async function loadHighScores() {
+    try {
+      highScores = await fetchHighScores(10);
+    } catch (e) {
+      console.error('Failed to load high scores:', e);
+    }
+  }
+
   function hardRestartGame() {
     levelIndex = 0;
-    lives = 2;
-    energy = 1.0;
+    lives = test_DEATH ? 0 : 2;
+    energy = test_DEATH ? 0.3 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
     score = 0;
     warpScore = 0;
     scoreDisplay = 0;
+    scoreNumericDisplay = 0;
+    scoreLocked = false;
+    scoreSubmitted = false;
+
+    hitFlashTimer = 0;
+    healFlashTimer = 0;
 
     resetShipForLevel();
     phase = 'start';
     gameOverTimer = 0;
+
+    // Load leaderboard for display on Game Over screen
+    loadHighScores();
+  }
+
+  async function submitScoreIfNeeded() {
+    if (scoreSubmitted) return;
+    if (score <= 0) return;
+
+    scoreSubmitted = true;
+    showNameEntry = true;
+    playerName = '';
+    cursorBlink = 0.0;
+  }
+
+  async function submitNameAndScore() {
+    if (!playerName || playerName.trim() === '') {
+      playerName = 'Pilot';
+    }
+
+    try {
+      await submitHighScore(playerName.trim(), score);
+      highScores = await fetchHighScores(10);
+    } catch (e) {
+      console.error('Failed to submit high score:', e);
+    }
+
+    showNameEntry = false;
+  }
+
+  function skipNameEntry() {
+    showNameEntry = false;
   }
 
   // --- Spawning (coins/hazards) ---
@@ -319,8 +369,8 @@ export function createGame(canvas) {
       gravMult: 1,
       attractMul: 1,
       speedMul: 1,
-      spawnTime: 0.0,  // animation timer (0 to 0.8s)
-      spawnDuration: 0.8  // 800ms spawn animation
+      spawnTime: 0.0,   // animation timer (0 to spawnDuration)
+      spawnDuration: 0.8
     };
     applyLevelBoost(body);
     bodies.push(body);
@@ -363,8 +413,8 @@ export function createGame(canvas) {
       gravMult: 1.0,
       attractMul: HEALTH_ATTRACT_MULT, // 25% weaker attraction
       speedMul: 1.0,
-      spawnTime: 0.0,  // animation timer (0 to 0.8s)
-      spawnDuration: 0.5  // 800ms spawn animation
+      spawnTime: 0.0,
+      spawnDuration: 0.5
     };
 
     console.log('Spawned health pickup at', x, y);
@@ -615,18 +665,6 @@ export function createGame(canvas) {
       });
     }
 
-    // Update hi-score if beaten (based on global score)
-    if (score > hiScore) {
-      hiScore = score;
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('nebula_hi_score', String(Math.floor(hiScore)));
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-
     if (lives > 0) {
       // Consume a life and respawn
       lives -= 1;
@@ -638,6 +676,9 @@ export function createGame(canvas) {
       phase = 'gameOver';
       gameOverTimer = 0.0;
       respawnPending = false;
+
+      // kick off score submit (fire-and-forget)
+      submitScoreIfNeeded();
     }
   }
 
@@ -834,6 +875,8 @@ export function createGame(canvas) {
       captureTimer = 2.5;
       ship.state = 'rotating';
       scoreLocked = true; // Lock score during wormhole capture
+      // Snap UI score to actual score so end-of-level UI is correct
+      scoreNumericDisplay = score;
     }
   }
 
@@ -845,13 +888,11 @@ export function createGame(canvas) {
     const baseR = wormhole.radius;
     const t = wormhole.angle;
 
-    // Make the ripple feel like it affects the background: use additive-like blending
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'lighter';
 
-    // now 5 rings, with one further inside
     const rippleCount = 5;
-    const innerOffset = -6; // inner ring slightly inside base radius
+    const innerOffset = -6;
     const step = 8;
 
     for (let i = 0; i < rippleCount; i++) {
@@ -860,7 +901,6 @@ export function createGame(canvas) {
       const offset = innerOffset + i * step;
       const r = baseR + offset + pulsate;
 
-      // more opaque towards the outer edges
       const maxAlpha = 0.55;
       const minAlpha = 0.18;
       const alpha = minAlpha + (i / (rippleCount - 1)) * (maxAlpha - minAlpha);
@@ -905,6 +945,24 @@ export function createGame(canvas) {
     }
 
     if (phase === 'gameOver') {
+      // Handle name entry screen clicks
+      if (showNameEntry && px != null && py != null) {
+        const x = px, y = py;
+        // Submit button
+        if (x >= submitNameBtn.x && x <= submitNameBtn.x + submitNameBtn.w &&
+            y >= submitNameBtn.y && y <= submitNameBtn.y + submitNameBtn.h) {
+          submitNameAndScore();
+          return;
+        }
+        // Skip button
+        if (x >= skipBtn.x && x <= skipBtn.x + skipBtn.w &&
+            y >= skipBtn.y && y <= skipBtn.y + skipBtn.h) {
+          skipNameEntry();
+          return;
+        }
+        return;
+      }
+
       if (gameOverTimer >= 1.0 && px != null && py != null) {
         const x = px, y = py;
         if (x >= restartBtn.x && x <= restartBtn.x + restartBtn.w &&
@@ -922,6 +980,24 @@ export function createGame(canvas) {
     ship.thrustDir = ship.angle;
   }
 
+  // Keyboard input for name entry
+  function onKeyPress(key) {
+    if (!showNameEntry) return;
+
+    if (key === 'Enter') {
+      submitNameAndScore();
+    } else if (key === 'Escape') {
+      skipNameEntry();
+    } else if (key === 'Backspace') {
+      playerName = playerName.slice(0, -1);
+    } else if (key.length === 1 && playerName.length < 20) {
+      // Only allow printable characters
+      if (key >= ' ' && key <= '~') {
+        playerName += key;
+      }
+    }
+  }
+
   function onRelease(px, py) {
     if (phase !== 'playing') return;
     if (!ship.alive) return;
@@ -931,7 +1007,9 @@ export function createGame(canvas) {
   // --- Update ---
   function update(dt) {
     if (phase === 'start') {
-      // Just showing title / instructions
+      // Let flashes decay even if we're on the start screen
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
@@ -945,12 +1023,24 @@ export function createGame(canvas) {
         return;
       }
       updateFragments(dt);
+
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
     if (phase === 'gameOver') {
       gameOverTimer += dt;
       updateFragments(dt);
+
+      // Animate cursor blink for name entry
+      if (showNameEntry) {
+        cursorBlink += dt;
+      }
+
+      // Ensure any red/green/blue flash fades out properly during Game Over
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
@@ -991,8 +1081,12 @@ export function createGame(canvas) {
         betweenFromLevel = levelIndex + 1;
         betweenToLevel = Math.min(levelIndex + 2, levels.length);
 
+        // Ensure displayed score is synced to true score at start of between-level
+        scoreNumericDisplay = score;
+
         // Calculate level completion bonus
         levelBonus = 500 * betweenFromLevel;
+        bonusDisplay = levelBonus; // Initialize bonus display to full amount
         bonusApplied = false;
 
         // Pick a random quote different from the previous one
@@ -1002,61 +1096,73 @@ export function createGame(canvas) {
         } while (newQuote === currentLevelQuote && levelStartQuotes.length > 1);
         currentLevelQuote = newQuote;
       }
+
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
     if (!ship.alive) {
       updateFragments(dt);
       tryRespawn(dt);
+
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
     if (phase === 'betweenLevels') {
       betweenTimer += dt;
 
-      // Stage 0: "Level N complete" (0.8s)
+      // Stage 0: "Level N complete" (fixed time)
       if (betweenStage === 0 && betweenTimer >= 0.8) {
         betweenStage = 1;
         betweenTimer = 0.0;
       }
-      // Stage 1: Show "BONUS: XXX" and apply it immediately (1.5s - show score for 1s before animating)
-      else if (betweenStage === 1) {
-        // Apply bonus to score at the start of stage 1
+      // Stage 1: Show static BONUS value (fixed time)
+      else if (betweenStage === 1 && betweenTimer >= 1.0) {
+        betweenStage = 2;
+        betweenTimer = 0.0;
+      }
+      // Stage 2: Apply bonus + animate until fully transferred
+      else if (betweenStage === 2) {
         if (!bonusApplied) {
-          score += levelBonus;
+          score += levelBonus; // apply full bonus to true score once
           bonusApplied = true;
         }
-        if (betweenTimer >= 1.5) {
-          betweenStage = 2;
+
+        // When both scoreNumericDisplay and bonusDisplay reach their targets,
+        // we can move on to stage 3.
+        const scoreDone = Math.abs(score - scoreNumericDisplay) <= 0.5;
+        const bonusDone = bonusDisplay <= 0.5;
+        if (scoreDone && bonusDone) {
+          scoreNumericDisplay = score;
+          bonusDisplay = 0;
+          betweenStage = 3;
           betweenTimer = 0.0;
         }
       }
-      // Stage 2: Score animating up (0.5s)
-      else if (betweenStage === 2 && betweenTimer >= 0.5) {
-        betweenStage = 3;
-        betweenTimer = 0.0;
-      }
-      // Stage 3: Pause after score animation (0.5s)
+      // Stage 3: Pause after animation
       else if (betweenStage === 3 && betweenTimer >= 0.5) {
         betweenStage = 4;
         betweenTimer = 0.0;
       }
-      // Stage 4: Pause before fade (0.6s)
+      // Stage 4: Pause before fade
       else if (betweenStage === 4 && betweenTimer >= 0.6) {
         betweenStage = 5;
         betweenTimer = 0.0;
       }
-      // Stage 5: Fade out and shrink score (0.2s)
-      else if (betweenStage === 5 && betweenTimer >= 0.2) {
+      // Stage 5: Fade out and shrink (fixed duration)
+      else if (betweenStage === 5 && betweenTimer >= 0.3) {
         betweenStage = 6;
         betweenTimer = 0.0;
       }
-      // Stage 6: Countdown 3..2..1 (3.0s)
+      // Stage 6: Countdown 3..2..1
       else if (betweenStage === 6 && betweenTimer >= 3.0) {
         betweenStage = 7;
         betweenTimer = 0.0;
       }
-      // Stage 7: Quote (1.5s)
+      // Stage 7: Quote, then start next level
       else if (betweenStage === 7 && betweenTimer >= 1.5) {
         startNextLevel();
         return;
@@ -1064,9 +1170,11 @@ export function createGame(canvas) {
 
       updateFragments(dt);
 
-      // Animate numeric score during betweenLevels (only after stage 1 completes, i.e., during stage 2+)
+      // Animate score up and bonus down during stage 2+
       if (betweenStage >= 2) {
         const numericScoreDiff = score - scoreNumericDisplay;
+        const bonusDiff = bonusDisplay - 0; // counting down to 0
+
         if (Math.abs(numericScoreDiff) > 0.5) {
           const scoreIncrementSpeed = 1000; // points per second
           const maxIncrement = scoreIncrementSpeed * dt;
@@ -1078,8 +1186,19 @@ export function createGame(canvas) {
         } else {
           scoreNumericDisplay = score; // snap to target when close
         }
+
+        // Animate bonus counting down at same speed
+        if (bonusDiff > 0.5) {
+          const bonusDecrementSpeed = 1000; // points per second
+          const maxDecrement = bonusDecrementSpeed * dt;
+          bonusDisplay = Math.max(0, bonusDisplay - maxDecrement);
+        } else {
+          bonusDisplay = 0; // snap to 0 when close
+        }
       }
 
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
     }
 
@@ -1158,7 +1277,7 @@ export function createGame(canvas) {
 
     // Bodies
     for (const b of bodies) {
-      // Calculate spawn animation scale (1px to full size over 800ms)
+      // Calculate spawn animation scale (1px to full size over spawnDuration)
       let renderRadius = b.radius;
       if (b.spawnTime !== undefined && b.spawnTime < b.spawnDuration) {
         const progress = b.spawnTime / b.spawnDuration;
@@ -1296,7 +1415,6 @@ export function createGame(canvas) {
       for (let i = 0; i < lives; i++) {
         ctx.save();
         ctx.translate(lx, ly);
-        // rotate mini ships to -45 degrees so they match the main ship vibe
         ctx.rotate(-Math.PI / 4);
 
         ctx.beginPath();
@@ -1305,7 +1423,7 @@ export function createGame(canvas) {
         ctx.lineTo(-lifeRadius * 0.4, 0);
         ctx.lineTo(-lifeRadius * 0.7, -lifeRadius * 0.6);
         ctx.closePath();
-        ctx.fill();  // no stroke → same look as main ship
+        ctx.fill();
 
         ctx.restore();
         lx -= (lifeRadius * 2 + lifeGap);
@@ -1325,7 +1443,6 @@ export function createGame(canvas) {
     // Heal flash when collecting health (double blue flash)
     if (healFlashTimer > 0) {
       const t = 1 - (healFlashTimer / HEAL_FLASH_TOTAL); // 0 -> 1 over duration
-      // Two quick flashes: one early, one mid
       const flashOn =
         (t >= 0.0 && t < 0.15) ||   // first flash
         (t >= 0.25 && t < 0.4);     // second flash
@@ -1444,7 +1561,7 @@ export function createGame(canvas) {
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.45);
       }
-      // Stage 1: Show "BONUS: XXX" below "Level N complete"
+      // Stage 1: Show static BONUS value
       else if (betweenStage === 1) {
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
@@ -1452,55 +1569,30 @@ export function createGame(canvas) {
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#ffd54a';
         ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
-        // Show score counting up
         ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
         ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
       }
-      // Stage 2: Score counting up (still showing bonus)
-      else if (betweenStage === 2) {
+      // Stage 2–4: Bonus counts down while score counts up
+      else if (betweenStage === 2 || betweenStage === 3 || betweenStage === 4) {
+        const bonusShown = Math.max(0, Math.floor(bonusDisplay));
         ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
         ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#ffd54a';
-        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
-        // Show score counting up
+        ctx.fillText(`BONUS: ${bonusShown}`, w * 0.5, h * 0.45);
         ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = '#fff';
         ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
       }
-      // Stage 3: Pause after score animation (same as stage 2)
-      else if (betweenStage === 3) {
-        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
-        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#ffd54a';
-        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
-        // Show final score
-        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
-      }
-      // Stage 4: Pause before fade (same as stage 3)
-      else if (betweenStage === 4) {
-        ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(`Level ${betweenFromLevel} complete`, w * 0.5, h * 0.35);
-        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#ffd54a';
-        ctx.fillText(`BONUS: ${levelBonus}`, w * 0.5, h * 0.45);
-        // Show final score
-        ctx.font = 'bold 48px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(String(Math.floor(scoreNumericDisplay)), w * 0.5, h * 0.6);
-      }
-      // Stage 5: Fade out and shrink score (0.3s)
+      // Stage 5: Fade out and shrink score + bonus + text
       else if (betweenStage === 5) {
         const progress = betweenTimer / 0.3; // 0 to 1 over 300ms
-        const fadeAlpha = 1 - progress; // fade from 1 to 0
-        const scale = 1 - progress; // shrink from 1 to 0
+        const fadeAlpha = 1 - progress;
+        const scale = 1 - progress;
+
+        const bonusShown = Math.max(0, Math.floor(bonusDisplay));
 
         // Fade "Level N complete"
         ctx.save();
@@ -1511,13 +1603,13 @@ export function createGame(canvas) {
         ctx.fillText(`Level ${betweenFromLevel} complete`, 0, 0);
         ctx.restore();
 
-        // Fade "BONUS: XXX"
+        // Fade "BONUS: X"
         ctx.save();
         ctx.translate(w * 0.5, h * 0.45);
         ctx.scale(scale, scale);
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
         ctx.fillStyle = `rgba(255, 213, 74, ${fadeAlpha})`;
-        ctx.fillText(`BONUS: ${levelBonus}`, 0, 0);
+        ctx.fillText(`BONUS: ${bonusShown}`, 0, 0);
         ctx.restore();
 
         // Fade and shrink the score
@@ -1559,21 +1651,149 @@ export function createGame(canvas) {
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(0, 0, w, h);
+
+      // Name entry overlay (shown on top of everything when active)
+      if (showNameEntry) {
+        // Semi-transparent backdrop
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(0, 0, w, h);
+
+        // Name entry panel
+        const panelW = Math.min(500, w * 0.85);
+        const panelH = 280;
+        const panelX = (w - panelW) / 2;
+        const panelY = (h - panelH) / 2;
+
+        // Panel background
+        ctx.fillStyle = 'rgba(30, 30, 50, 0.95)';
+        ctx.fillRect(panelX, panelY, panelW, panelH);
+
+        // Panel border
+        ctx.strokeStyle = '#a8ffd9';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+        // Title
+        ctx.fillStyle = '#a8ffd9';
+        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('New High Score!', w * 0.5, panelY + 45);
+
+        // Score display
+        ctx.fillStyle = '#ffd54a';
+        ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(String(Math.floor(score)), w * 0.5, panelY + 85);
+
+        // Prompt text
+        ctx.fillStyle = '#fff';
+        ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText('Enter your name:', w * 0.5, panelY + 120);
+
+        // Name input box
+        const inputW = panelW * 0.75;
+        const inputH = 40;
+        const inputX = (w - inputW) / 2;
+        const inputY = panelY + 135;
+
+        // Input background
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(inputX, inputY, inputW, inputH);
+
+        // Input border
+        ctx.strokeStyle = '#66d9ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(inputX, inputY, inputW, inputH);
+
+        // Name text
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px monospace';
+        ctx.textAlign = 'center';
+        const displayName = playerName || '';
+
+        // Blinking cursor
+        const showCursor = (cursorBlink % 1.0) < 0.5;
+        const nameWithCursor = showCursor ? displayName + '|' : displayName;
+        ctx.fillText(nameWithCursor, w * 0.5, inputY + 26);
+
+        // Buttons
+        const btnY = panelY + 205;
+        const btnGap = 20;
+        const totalBtnWidth = submitNameBtn.w + skipBtn.w + btnGap;
+        const startX = (w - totalBtnWidth) / 2;
+
+        // Submit button
+        submitNameBtn.w = 180;
+        submitNameBtn.h = 44;
+        submitNameBtn.x = startX;
+        submitNameBtn.y = btnY;
+
+        ctx.fillStyle = '#16c784';
+        ctx.fillRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
+        ctx.strokeStyle = '#c8ffe6';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Submit', submitNameBtn.x + submitNameBtn.w / 2, submitNameBtn.y + submitNameBtn.h / 2 + 5);
+
+        // Skip button
+        skipBtn.w = 140;
+        skipBtn.h = 44;
+        skipBtn.x = startX + submitNameBtn.w + btnGap;
+        skipBtn.y = btnY;
+
+        ctx.fillStyle = '#666';
+        ctx.fillRect(skipBtn.x, skipBtn.y, skipBtn.w, skipBtn.h);
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(skipBtn.x, skipBtn.y, skipBtn.w, skipBtn.h);
+        ctx.fillStyle = '#fff';
+        ctx.fillText('Skip', skipBtn.x + skipBtn.w / 2, skipBtn.y + skipBtn.h / 2 + 5);
+
+        ctx.restore();
+        return;
+      }
+
+      // Regular game over screen (when name entry is not shown)
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Game Over', w * 0.5, h * 0.4);
+      ctx.fillText('Game Over', w * 0.5, h * 0.2);
 
-      // Show final score & hi-score
+      // Show final score
       ctx.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText(`Score: ${Math.floor(score)}`, w * 0.5, h * 0.4 + 40);
-      ctx.fillText(`Best: ${Math.floor(hiScore)}`, w * 0.5, h * 0.4 + 70);
+      ctx.fillText(`Score: ${Math.floor(score)}`, w * 0.5, h * 0.2 + 40);
 
+      // Centered Leaderboard
+      let boardY = h * 0.35;
+
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 20px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      ctx.fillText('Leaderboard', w * 0.5, boardY);
+      boardY += 26;
+
+      ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+
+      if (!highScores || highScores.length === 0) {
+        ctx.fillText('No scores yet...', w * 0.5, boardY + 4);
+      } else {
+        const maxRows = 8;
+        for (let i = 0; i < Math.min(highScores.length, maxRows); i++) {
+          const row = highScores[i];
+          const name = row.name ?? 'Anon';
+          const s = row.score ?? 0;
+          const line = `${i + 1}. ${name} - ${s}`;
+          ctx.fillText(line, w * 0.5, boardY + i * 20);
+        }
+      }
+
+      // Restart button
       if (gameOverTimer >= 1.0) {
         restartBtn.w = 220;
         restartBtn.h = 48;
         restartBtn.x = w * 0.5 - restartBtn.w / 2;
-        restartBtn.y = h * 0.6;
+        restartBtn.y = h * 0.8;
         ctx.fillStyle = '#1f8efa';
         ctx.fillRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
         ctx.strokeStyle = '#cfe8ff';
@@ -1597,5 +1817,5 @@ export function createGame(canvas) {
   // Ensure first spawn is centered + start screen active
   hardRestartGame();
 
-  return { update, render, onResize, onPress, onRelease };
+  return { update, render, onResize, onPress, onRelease, onKeyPress };
 }
