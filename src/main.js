@@ -48,11 +48,16 @@ function onPointerUp(e) {
 
 // Keyboard (space)
 function onKeyDown(e) {
+  // Handle name entry typing (all keys)
+  if (game && game.onKeyPress) {
+    game.onKeyPress(e.key);
+  }
+
   if (e.code === 'Space' || e.key === ' ') {
     e.preventDefault();
     if (!keyDown) {
       keyDown = true;
-      // For keyboard we don’t need coords; game ignores them in 'playing'
+      // For keyboard we don't need coords; game ignores them in 'playing'
       if (game && game.onPress) {
         game.onPress();
       }
