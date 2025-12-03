@@ -1364,7 +1364,7 @@ export function createGame(canvas) {
 
       // Title
       ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Nebula', w * 0.5, py + 60);
+      ctx.fillText('Nebula (test)', w * 0.5, py + 60);
 
       // Instructions
       ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
