@@ -9,6 +9,7 @@ export function createGame(canvas) {
 
   // Environment-based configuration
   const isTestEnv = import.meta.env.VITE_ENV === 'test';
+  const game_title = isTestEnv ? 'Nebula (test)' : 'Nebula';
   const test_vars = isTestEnv ? {
     test_EOL: false,
     test_DEATH: true,
@@ -1612,7 +1613,7 @@ export function createGame(canvas) {
 
       // Title
       ctx.font = 'bold 28px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Nebula (test)', w * 0.5, py + 60);
+      ctx.fillText(game_title, w * 0.5, py + 60);
 
       // Instructions
       ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
