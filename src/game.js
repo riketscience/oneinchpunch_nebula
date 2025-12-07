@@ -4,6 +4,9 @@ export function createGame(canvas) {
   const W = () => canvas.clientWidth;
   const H = () => canvas.clientHeight;
 
+  // Hidden input for mobile keyboard support
+  const nameInputEl = document.getElementById('nameInput');
+
   // test variables
   const test_EOL = false;
   const test_DEATH = true;
@@ -59,7 +62,10 @@ export function createGame(canvas) {
     'Let\'s crush it...',
     'Let\'s GO!',
     'Get ready...',
-    'I\'ve said it before & I\'ll say it again...',
+    'Make it so...',
+    'Never quit...',
+    'Hold tight...',
+    'Prepare for battle...',
   ];
 
   // Ship collision triangle in local ship coordinates (approx)
@@ -209,7 +215,7 @@ export function createGame(canvas) {
   // --- High score entry state ---
   let showNameEntry = false;
   let playerName = '';
-  let cursorBlink = 0.0;
+  let nameEntryShowTime = 0; // timestamp when name entry appears
   const submitNameBtn = { x: 0, y: 0, w: 180, h: 44 };
   const skipBtn = { x: 0, y: 0, w: 140, h: 44 };
 
@@ -298,6 +304,37 @@ export function createGame(canvas) {
     loadHighScores();
   }
 
+  function softRestartGame() {
+    levelIndex = 0;
+    lives = test_DEATH ? 0 : 2;
+    energy = test_DEATH ? 0.3 : 1.0;
+    energyDisplay = energy;
+
+    // New run: reset both global score and warp
+    score = 0;
+    warpScore = 0;
+    scoreDisplay = 0;
+    scoreNumericDisplay = 0;
+    scoreLocked = false;
+    scoreSubmitted = false;
+
+    hitFlashTimer = 0;
+    healFlashTimer = 0;
+
+    resetShipForLevel();
+
+    // Pick a random quote for game start
+    currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
+    phase = 'startCountdown';
+    startCountdownTimer = 0.0;
+    startCountdownStage = 0;
+
+    gameOverTimer = 0;
+
+    // Load leaderboard for display on Game Over screen
+    loadHighScores();
+  }
+
   async function submitScoreIfNeeded() {
     if (scoreSubmitted) return;
     if (score <= 0) return;
@@ -305,7 +342,15 @@ export function createGame(canvas) {
     scoreSubmitted = true;
     showNameEntry = true;
     playerName = '';
-    cursorBlink = 0.0;
+    nameEntryShowTime = performance.now(); // Record when name entry appears
+
+    // Focus hidden input to trigger mobile keyboard
+    if (nameInputEl) {
+      nameInputEl.value = '';
+      setTimeout(() => {
+        nameInputEl.focus();
+      }, 100);
+    }
   }
 
   async function submitNameAndScore() {
@@ -321,10 +366,20 @@ export function createGame(canvas) {
     }
 
     showNameEntry = false;
+
+    // Blur hidden input to hide mobile keyboard
+    if (nameInputEl) {
+      nameInputEl.blur();
+    }
   }
 
   function skipNameEntry() {
     showNameEntry = false;
+
+    // Blur hidden input to hide mobile keyboard
+    if (nameInputEl) {
+      nameInputEl.blur();
+    }
   }
 
   // --- Spawning (coins/hazards) ---
@@ -473,22 +528,50 @@ export function createGame(canvas) {
     if (ship.x < minX) {
       ship.x = minX;
       ship.vx = -ship.vx * BOUNCE_DAMP;
-      energy = Math.max(0, energy - BUMP_DAMAGE);
+      energy -= BUMP_DAMAGE;
+      // Short subtle flash for wall bump
+      hitFlashColor = 'rgba(255,60,60,';
+      hitFlashTimer = 0.05;
+      if (energy <= 0 && ship.alive) {
+        energy = 0;
+        triggerExplosion();
+      }
     }
     if (ship.x > maxX) {
       ship.x = maxX;
       ship.vx = -ship.vx * BOUNCE_DAMP;
-      energy = Math.max(0, energy - BUMP_DAMAGE);
+      energy -= BUMP_DAMAGE;
+      // Short subtle flash for wall bump
+      hitFlashColor = 'rgba(255,60,60,';
+      hitFlashTimer = 0.05;
+      if (energy <= 0 && ship.alive) {
+        energy = 0;
+        triggerExplosion();
+      }
     }
     if (ship.y < minY) {
       ship.y = minY;
       ship.vy = -ship.vy * BOUNCE_DAMP;
-      energy = Math.max(0, energy - BUMP_DAMAGE);
+      energy -= BUMP_DAMAGE;
+      // Short subtle flash for wall bump
+      hitFlashColor = 'rgba(255,60,60,';
+      hitFlashTimer = 0.05;
+      if (energy <= 0 && ship.alive) {
+        energy = 0;
+        triggerExplosion();
+      }
     }
     if (ship.y > maxY) {
       ship.y = maxY;
       ship.vy = -ship.vy * BOUNCE_DAMP;
-      energy = Math.max(0, energy - BUMP_DAMAGE);
+      energy -= BUMP_DAMAGE;
+      // Short subtle flash for wall bump
+      hitFlashColor = 'rgba(255,60,60,';
+      hitFlashTimer = 0.05;
+      if (energy <= 0 && ship.alive) {
+        energy = 0;
+        triggerExplosion();
+      }
     }
 
     for (const b of bodies) {
@@ -677,8 +760,8 @@ export function createGame(canvas) {
       gameOverTimer = 0.0;
       respawnPending = false;
 
-      // kick off score submit (fire-and-forget)
-      submitScoreIfNeeded();
+      // Don't submit score immediately - wait for death animation (2.5s)
+      // submitScoreIfNeeded will be called after delay in update loop
     }
   }
 
@@ -947,6 +1030,12 @@ export function createGame(canvas) {
     if (phase === 'gameOver') {
       // Handle name entry screen clicks
       if (showNameEntry && px != null && py != null) {
+        // Ignore clicks for 300ms after name entry appears to prevent stale touch events
+        const timeSinceNameEntryAppeared = performance.now() - nameEntryShowTime;
+        if (timeSinceNameEntryAppeared < 300) {
+          return; // Debounce period - ignore this click
+        }
+
         const x = px, y = py;
         // Submit button
         if (x >= submitNameBtn.x && x <= submitNameBtn.x + submitNameBtn.w &&
@@ -967,7 +1056,7 @@ export function createGame(canvas) {
         const x = px, y = py;
         if (x >= restartBtn.x && x <= restartBtn.x + restartBtn.w &&
             y >= restartBtn.y && y <= restartBtn.y + restartBtn.h) {
-          hardRestartGame();
+          softRestartGame();
         }
       }
       return;
@@ -1033,9 +1122,42 @@ export function createGame(canvas) {
       gameOverTimer += dt;
       updateFragments(dt);
 
-      // Animate cursor blink for name entry
-      if (showNameEntry) {
-        cursorBlink += dt;
+      // After death animation (2.5s), check if we should show name entry
+      if (gameOverTimer >= 2.5 && !scoreSubmitted && !showNameEntry) {
+        // Re-fetch high scores to get latest data, then check if player qualifies
+        (async () => {
+          try {
+            // Refresh high scores from database
+            highScores = await fetchHighScores(10);
+
+            // Check if score qualifies for top 10
+            // If less than 10 scores exist, OR score beats/ties the lowest (10th place)
+            let isTop10 = false;
+            if (score > 0) {
+              if (highScores.length < 10) {
+                // Less than 10 entries, so any score > 0 qualifies
+                isTop10 = true;
+              } else if (highScores.length >= 10) {
+                // Check if score beats OR TIES 10th place (index 9)
+                // Ties qualify because newer entries push down older ones
+                const tenthPlaceScore = highScores[9]?.score || 0;
+                isTop10 = score >= tenthPlaceScore;
+              }
+            }
+
+            console.log('Top 10 check:', { score, highScoresLength: highScores.length, tenthPlace: highScores[9]?.score, isTop10, highScores });
+
+            if (isTop10) {
+              submitScoreIfNeeded(); // Shows name entry screen
+            } else {
+              scoreSubmitted = true; // Don't show name entry
+            }
+          } catch (e) {
+            console.error('Failed to check high scores:', e);
+            // If fetch fails, assume they qualify to be safe
+            submitScoreIfNeeded();
+          }
+        })();
       }
 
       // Ensure any red/green/blue flash fades out properly during Game Over
@@ -1433,7 +1555,10 @@ export function createGame(canvas) {
 
     // Hit flash when taking damage (red for hazard, green for elite)
     if (hitFlashTimer > 0) {
-      const alpha = Math.min(0.4, (hitFlashTimer / 0.1) * 0.4);
+      // Wall bumps (0.05s) get reduced opacity; enemy hits (0.1s) get full
+      const maxAlpha = hitFlashTimer <= 0.05 ? 0.2 : 0.4;
+      const flashDuration = hitFlashTimer <= 0.05 ? 0.05 : 0.1;
+      const alpha = Math.min(maxAlpha, (hitFlashTimer / flashDuration) * maxAlpha);
       ctx.save();
       ctx.fillStyle = `${hitFlashColor}${alpha})`;
       ctx.fillRect(0, 0, w, h);
@@ -1658,9 +1783,10 @@ export function createGame(canvas) {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, w, h);
 
-        // Name entry panel
-        const panelW = Math.min(500, w * 0.85);
-        const panelH = 280;
+        // Name entry panel - responsive sizing
+        const scale = Math.min(1, w / 400, h / 350); // Scale based on viewport
+        const panelW = Math.min(500, w * 0.9);
+        const panelH = Math.min(280 * scale, h * 0.8);
         const panelX = (w - panelW) / 2;
         const panelY = (h - panelH) / 2;
 
@@ -1670,30 +1796,30 @@ export function createGame(canvas) {
 
         // Panel border
         ctx.strokeStyle = '#a8ffd9';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2;
         ctx.strokeRect(panelX, panelY, panelW, panelH);
 
         // Title
         ctx.fillStyle = '#a8ffd9';
-        ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.font = `bold ${Math.floor(20 * scale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
         ctx.textAlign = 'center';
-        ctx.fillText('New High Score!', w * 0.5, panelY + 45);
+        ctx.fillText('New High Score!', w * 0.5, panelY + 35 * scale);
 
         // Score display
         ctx.fillStyle = '#ffd54a';
-        ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillText(String(Math.floor(score)), w * 0.5, panelY + 85);
+        ctx.font = `bold ${Math.floor(28 * scale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.fillText(String(Math.floor(score)), w * 0.5, panelY + 70 * scale);
 
         // Prompt text
         ctx.fillStyle = '#fff';
-        ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillText('Enter your name:', w * 0.5, panelY + 120);
+        ctx.font = `${Math.floor(14 * scale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.fillText('Enter your name:', w * 0.5, panelY + 100 * scale);
 
         // Name input box
-        const inputW = panelW * 0.75;
-        const inputH = 40;
+        const inputW = panelW * 0.8;
+        const inputH = Math.floor(36 * scale);
         const inputX = (w - inputW) / 2;
-        const inputY = panelY + 135;
+        const inputY = panelY + 112 * scale;
 
         // Input background
         ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
@@ -1706,41 +1832,32 @@ export function createGame(canvas) {
 
         // Name text
         ctx.fillStyle = '#fff';
-        ctx.font = '20px monospace';
+        ctx.font = `${Math.floor(18 * scale)}px monospace`;
         ctx.textAlign = 'center';
         const displayName = playerName || '';
 
-        // Blinking cursor
-        const showCursor = (cursorBlink % 1.0) < 0.5;
-        const nameWithCursor = showCursor ? displayName + '|' : displayName;
-        ctx.fillText(nameWithCursor, w * 0.5, inputY + 26);
+        // Sync hidden input value (for mobile keyboard)
+        if (nameInputEl && nameInputEl.value !== playerName) {
+          nameInputEl.value = playerName;
+        }
 
-        // Buttons
-        const btnY = panelY + 205;
-        const btnGap = 20;
+        // Display name (no blinking cursor)
+        ctx.fillText(displayName, w * 0.5, inputY + inputH * 0.65);
+
+        // Buttons (Skip on left, Submit on right per UX standards)
+        const btnY = panelY + Math.floor(180 * scale);
+        const btnGap = 16;
+        const btnScale = Math.min(1, w / 500); // Scale down on small screens
+        skipBtn.w = Math.floor(140 * btnScale);
+        skipBtn.h = Math.floor(50 * btnScale);
+        submitNameBtn.w = Math.floor(180 * btnScale);
+        submitNameBtn.h = Math.floor(50 * btnScale);
+
         const totalBtnWidth = submitNameBtn.w + skipBtn.w + btnGap;
         const startX = (w - totalBtnWidth) / 2;
 
-        // Submit button
-        submitNameBtn.w = 180;
-        submitNameBtn.h = 44;
-        submitNameBtn.x = startX;
-        submitNameBtn.y = btnY;
-
-        ctx.fillStyle = '#16c784';
-        ctx.fillRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
-        ctx.strokeStyle = '#c8ffe6';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 16px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Submit', submitNameBtn.x + submitNameBtn.w / 2, submitNameBtn.y + submitNameBtn.h / 2 + 5);
-
-        // Skip button
-        skipBtn.w = 140;
-        skipBtn.h = 44;
-        skipBtn.x = startX + submitNameBtn.w + btnGap;
+        // Skip button (LEFT)
+        skipBtn.x = startX;
         skipBtn.y = btnY;
 
         ctx.fillStyle = '#666';
@@ -1749,47 +1866,65 @@ export function createGame(canvas) {
         ctx.lineWidth = 2;
         ctx.strokeRect(skipBtn.x, skipBtn.y, skipBtn.w, skipBtn.h);
         ctx.fillStyle = '#fff';
-        ctx.fillText('Skip', skipBtn.x + skipBtn.w / 2, skipBtn.y + skipBtn.h / 2 + 5);
+        ctx.font = `bold ${Math.floor(17 * btnScale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('Skip', skipBtn.x + skipBtn.w / 2, skipBtn.y + skipBtn.h / 2 + 6);
+
+        // Submit button (RIGHT)
+        submitNameBtn.x = startX + skipBtn.w + btnGap;
+        submitNameBtn.y = btnY;
+
+        ctx.fillStyle = '#16c784';
+        ctx.fillRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
+        ctx.strokeStyle = '#c8ffe6';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(submitNameBtn.x, submitNameBtn.y, submitNameBtn.w, submitNameBtn.h);
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.floor(17 * btnScale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+        ctx.fillText('Submit', submitNameBtn.x + submitNameBtn.w / 2, submitNameBtn.y + submitNameBtn.h / 2 + 6);
 
         ctx.restore();
         return;
       }
 
-      // Regular game over screen (when name entry is not shown)
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Game Over', w * 0.5, h * 0.2);
+      // Regular game over screen (only show after score is submitted or skipped)
+      // This ensures we don't see leaderboard until name entry is complete
+      if (scoreSubmitted) {
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText('Game Over', w * 0.5, h * 0.2);
 
-      // Show final score
-      ctx.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText(`Score: ${Math.floor(score)}`, w * 0.5, h * 0.2 + 40);
+        // Show final score
+        ctx.font = '18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText(`Score: ${Math.floor(score)}`, w * 0.5, h * 0.2 + 40);
 
-      // Centered Leaderboard
-      let boardY = h * 0.35;
+        // Centered Leaderboard
+        let boardY = h * 0.35;
 
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 20px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-      ctx.fillText('Leaderboard', w * 0.5, boardY);
-      boardY += 26;
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 20px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.fillText('Leaderboard', w * 0.5, boardY);
+        boardY += 26;
 
-      ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
 
-      if (!highScores || highScores.length === 0) {
-        ctx.fillText('No scores yet...', w * 0.5, boardY + 4);
-      } else {
-        const maxRows = 8;
-        for (let i = 0; i < Math.min(highScores.length, maxRows); i++) {
-          const row = highScores[i];
-          const name = row.name ?? 'Anon';
-          const s = row.score ?? 0;
-          const line = `${i + 1}. ${name} - ${s}`;
-          ctx.fillText(line, w * 0.5, boardY + i * 20);
+        if (!highScores || highScores.length === 0) {
+          ctx.fillText('No scores yet...', w * 0.5, boardY + 4);
+        } else {
+          const maxRows = 10; // Show all top 10
+          for (let i = 0; i < Math.min(highScores.length, maxRows); i++) {
+            const row = highScores[i];
+            const name = row.name ?? 'Anon';
+            const s = row.score ?? 0;
+            const line = `${i + 1}. ${name} - ${s}`;
+            ctx.fillText(line, w * 0.5, boardY + i * 20);
+          }
         }
       }
 
-      // Restart button
-      if (gameOverTimer >= 1.0) {
+      // Restart button (only show after score is submitted)
+      if (scoreSubmitted && gameOverTimer >= 1.0) {
         restartBtn.w = 220;
         restartBtn.h = 48;
         restartBtn.x = w * 0.5 - restartBtn.w / 2;
@@ -1812,6 +1947,27 @@ export function createGame(canvas) {
   function onResize() {
     ship.x = clamp(ship.x, 0, W());
     ship.y = clamp(ship.y, 0, H());
+  }
+
+  // Sync hidden input with playerName for mobile keyboard
+  if (nameInputEl) {
+    nameInputEl.addEventListener('input', (e) => {
+      if (showNameEntry) {
+        playerName = e.target.value.slice(0, 20);
+        // Keep input synced
+        if (e.target.value !== playerName) {
+          e.target.value = playerName;
+        }
+      }
+    });
+
+    // Handle Enter key on mobile
+    nameInputEl.addEventListener('keydown', (e) => {
+      if (showNameEntry && e.key === 'Enter') {
+        e.preventDefault();
+        submitNameAndScore();
+      }
+    });
   }
 
   // Ensure first spawn is centered + start screen active
