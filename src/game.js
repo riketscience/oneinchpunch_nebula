@@ -7,9 +7,15 @@ export function createGame(canvas) {
   // Hidden input for mobile keyboard support
   const nameInputEl = document.getElementById('nameInput');
 
-  // test variables
-  const test_EOL = false;
-  const test_DEATH = true;
+  // Environment-based configuration
+  const isTestEnv = import.meta.env.VITE_ENV === 'test';
+  const test_vars = isTestEnv ? {
+    test_EOL: false,
+    test_DEATH: true,
+  } : {
+    test_EOL: false,
+    test_DEATH: false,
+  };
 
   // --- Constants ---
   const TWO_PI = Math.PI * 2;
@@ -101,7 +107,7 @@ export function createGame(canvas) {
   // --- Levels ---
   const levels = [
     {
-      scoreGoal: test_EOL ? 25 : 200,
+      scoreGoal: test_vars.test_EOL ? 25 : 200,
       coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
       healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // (not used yet)
       typeBoost: {
@@ -185,8 +191,8 @@ export function createGame(canvas) {
   let bonusApplied = false;
 
   // --- Energy, lives, respawn, hit feedback ---
-  let energy = !test_DEATH ? 1.0 : 0.3;
-  let lives = !test_DEATH ? 2 : 0; // extra lives (3 total: current + 2 icons)
+  let energy = !test_vars.test_DEATH ? 1.0 : 0.3;
+  let lives = !test_vars.test_DEATH ? 2 : 0; // extra lives (3 total: current + 2 icons)
   let energyDisplay = energy; // smoothed energy for HUD
 
   // warpScore = points accumulated toward warp threshold this level
@@ -281,8 +287,8 @@ export function createGame(canvas) {
 
   function hardRestartGame() {
     levelIndex = 0;
-    lives = test_DEATH ? 0 : 2;
-    energy = test_DEATH ? 0.3 : 1.0;
+    lives = test_vars.test_DEATH ? 0 : 2;
+    energy = test_vars.test_DEATH ? 0.3 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -306,7 +312,7 @@ export function createGame(canvas) {
 
   function softRestartGame() {
     levelIndex = 0;
-    lives = test_DEATH ? 0 : 2;
+    lives = test_vars.test_DEATH ? 0 : 2;
     energy = test_DEATH ? 0.3 : 1.0;
     energyDisplay = energy;
 
