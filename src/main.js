@@ -31,6 +31,8 @@ function resizeCanvas() {
 
 // Pointer / touch
 function onPointerDown(e) {
+  // Prevent iOS context menu on long press
+  e.preventDefault();
   pointerDown = true;
   // Always pass coords so Start / Restart buttons work
   if (game && game.onPress) {
@@ -99,6 +101,12 @@ if (window.visualViewport) {
 
 canvas.addEventListener('pointerdown', onPointerDown);
 window.addEventListener('pointerup', onPointerUp);
+
+// Prevent iOS context menu (long press) and callout
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+canvas.addEventListener('touchend', (e) => e.preventDefault(), { passive: false });
 
 // Keyboard events
 window.addEventListener('keydown', onKeyDown);

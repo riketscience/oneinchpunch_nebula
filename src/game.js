@@ -776,6 +776,9 @@ export function createGame(canvas) {
       gameOverTimer = 0.0;
       respawnPending = false;
 
+      // Clear all bodies from playfield so they don't show behind game over screen
+      bodies = [];
+
       // Don't submit score immediately - wait for death animation (2s)
       // submitScoreIfNeeded will be called after delay in update loop
     }
@@ -1263,7 +1266,7 @@ export function createGame(canvas) {
         }
 
         // Calculate dynamic duration based on level
-        const bonusTransferDuration = (betweenFromLevel * 0.5) + 0.5;
+        const bonusTransferDuration = (betweenFromLevel * 0.5) + 0.2;
 
         // When timer reaches calculated duration AND animation is complete, move to next stage
         const timerDone = betweenTimer >= bonusTransferDuration;
@@ -1278,12 +1281,12 @@ export function createGame(canvas) {
         }
       }
       // Stage 3: Pause after animation
-      else if (betweenStage === 3 && betweenTimer >= 0.5) {
+      else if (betweenStage === 3 && betweenTimer >= 0.3) {
         betweenStage = 4;
         betweenTimer = 0.0;
       }
       // Stage 4: Pause before fade
-      else if (betweenStage === 4 && betweenTimer >= 0.6) {
+      else if (betweenStage === 4 && betweenTimer >= 0.3) {
         betweenStage = 5;
         betweenTimer = 0.0;
       }
@@ -1955,9 +1958,9 @@ export function createGame(canvas) {
               const lineY = boardY + i * 20;
               const time = Date.now() / 1000;
 
-              // Create 4 sparkles in 3D elliptical orbit
-              for (let j = 0; j < 4; j++) {
-                const angle = (time * 0.5 + j * Math.PI / 2) % TWO_PI;
+              // Create 5 sparkles in 3D elliptical orbit
+              for (let j = 0; j < 5; j++) {
+                const angle = (time * 0.5 + j * TWO_PI / 5) % TWO_PI;
 
                 // Horizontal position (left-right orbit)
                 const sparkleX = w * 0.5 + Math.cos(angle) * 120;
@@ -1974,11 +1977,12 @@ export function createGame(canvas) {
                 const baseSize = 2 + twinkle * 1.5;
                 const size = baseSize * depthFactor;
 
-                // Opacity also affected by depth (further = more transparent)
-                const depthOpacity = 0.4 + depthFactor * 0.3; // ranges from 0.4 to 0.7
+                // Opacity: vary between 0.2 and 1.0 (20% to 100%)
+                const baseOpacity = 0.2 + depthFactor * 0.5; // ranges from 0.2 to 0.7
+                const finalOpacity = baseOpacity + twinkle * 0.3; // adds up to 0.3 more
 
                 ctx.save();
-                ctx.fillStyle = `rgba(255, 215, 0, ${depthOpacity * twinkle})`;
+                ctx.fillStyle = `rgba(255, 215, 0, ${finalOpacity})`;
                 ctx.beginPath();
                 ctx.arc(sparkleX, sparkleY, size, 0, TWO_PI);
                 ctx.fill();
@@ -2001,9 +2005,9 @@ export function createGame(canvas) {
         restartBtn.h = 48;
         restartBtn.x = w * 0.5 - restartBtn.w / 2;
         restartBtn.y = h * 0.8;
-        ctx.fillStyle = '#1f8efa';
+        ctx.fillStyle = '#16c784'; // Match start button color
         ctx.fillRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
-        ctx.strokeStyle = '#cfe8ff';
+        ctx.strokeStyle = '#c8ffe6'; // Match start button border
         ctx.lineWidth = 2;
         ctx.strokeRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
         ctx.fillStyle = '#fff';
