@@ -223,6 +223,7 @@ export function createGame(canvas) {
   let showNameEntry = false;
   let playerName = '';
   let nameEntryShowTime = 0; // timestamp when name entry appears
+  let isSubmittingScore = false; // prevent duplicate submissions
   const submitNameBtn = { x: 0, y: 0, w: 180, h: 44 };
   const skipBtn = { x: 0, y: 0, w: 140, h: 44 };
 
@@ -232,7 +233,8 @@ export function createGame(canvas) {
 
   // --- Online high scores ---
   let highScores = [];        // fetched from Supabase
-  let scoreSubmitted = false; // avoid multiple submits per run
+  let nameEntryProcessed = false; // Track if we've checked for top 10
+  let lastSubmittedName = ''; // Track the name we just submitted to highlight in leaderboard
 
   // --- Helpers ---
   function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
@@ -298,7 +300,9 @@ export function createGame(canvas) {
     scoreDisplay = 0;
     scoreNumericDisplay = 0;
     scoreLocked = false;
-    scoreSubmitted = false;
+    nameEntryProcessed = false;
+    showNameEntry = false;
+    lastSubmittedName = ''; // Clear highlighted name
 
     hitFlashTimer = 0;
     healFlashTimer = 0;
@@ -314,7 +318,7 @@ export function createGame(canvas) {
   function softRestartGame() {
     levelIndex = 0;
     lives = test_vars.test_DEATH ? 0 : 2;
-    energy = test_DEATH ? 0.3 : 1.0;
+    energy = test_vars.test_DEATH ? 0.3 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -323,7 +327,9 @@ export function createGame(canvas) {
     scoreDisplay = 0;
     scoreNumericDisplay = 0;
     scoreLocked = false;
-    scoreSubmitted = false;
+    nameEntryProcessed = false;
+    showNameEntry = false;
+    lastSubmittedName = ''; // Clear highlighted name
 
     hitFlashTimer = 0;
     healFlashTimer = 0;
@@ -342,14 +348,10 @@ export function createGame(canvas) {
     loadHighScores();
   }
 
-  async function submitScoreIfNeeded() {
-    if (scoreSubmitted) return;
-    if (score <= 0) return;
-
-    scoreSubmitted = true;
+  function showNameEntryForm() {
     showNameEntry = true;
     playerName = '';
-    nameEntryShowTime = performance.now(); // Record when name entry appears
+    nameEntryShowTime = performance.now();
 
     // Focus hidden input to trigger mobile keyboard
     if (nameInputEl) {
@@ -361,6 +363,10 @@ export function createGame(canvas) {
   }
 
   async function submitNameAndScore() {
+    // Prevent duplicate submissions
+    if (isSubmittingScore) return;
+    isSubmittingScore = true;
+
     if (!playerName || playerName.trim() === '') {
       playerName = 'Pilot';
     }
@@ -368,11 +374,14 @@ export function createGame(canvas) {
     try {
       await submitHighScore(playerName.trim(), score);
       highScores = await fetchHighScores(10);
+      // Store the submitted name to highlight in leaderboard
+      lastSubmittedName = playerName.trim();
     } catch (e) {
       console.error('Failed to submit high score:', e);
     }
 
     showNameEntry = false;
+    isSubmittingScore = false;
 
     // Blur hidden input to hide mobile keyboard
     if (nameInputEl) {
@@ -767,7 +776,7 @@ export function createGame(canvas) {
       gameOverTimer = 0.0;
       respawnPending = false;
 
-      // Don't submit score immediately - wait for death animation (2.5s)
+      // Don't submit score immediately - wait for death animation (2s)
       // submitScoreIfNeeded will be called after delay in update loop
     }
   }
@@ -1059,7 +1068,8 @@ export function createGame(canvas) {
         return;
       }
 
-      if (gameOverTimer >= 1.0 && px != null && py != null) {
+      // Restart button (only active when NOT showing name entry and after 1 second)
+      if (!showNameEntry && gameOverTimer >= 1.0 && px != null && py != null) {
         const x = px, y = py;
         if (x >= restartBtn.x && x <= restartBtn.x + restartBtn.w &&
             y >= restartBtn.y && y <= restartBtn.y + restartBtn.h) {
@@ -1129,45 +1139,36 @@ export function createGame(canvas) {
       gameOverTimer += dt;
       updateFragments(dt);
 
-      // After death animation (2.5s), check if we should show name entry
-      if (gameOverTimer >= 2.5 && !scoreSubmitted && !showNameEntry) {
-        // Re-fetch high scores to get latest data, then check if player qualifies
+      // After death animation (2s), check if score qualifies for top 10
+      if (gameOverTimer >= 2 && !nameEntryProcessed) {
+        nameEntryProcessed = true;
+
+        // Re-fetch high scores to check if player qualifies
         (async () => {
           try {
-            // Refresh high scores from database
             highScores = await fetchHighScores(10);
 
-            // Check if score qualifies for top 10
-            // If less than 10 scores exist, OR score beats/ties the lowest (10th place)
             let isTop10 = false;
             if (score > 0) {
               if (highScores.length < 10) {
-                // Less than 10 entries, so any score > 0 qualifies
                 isTop10 = true;
-              } else if (highScores.length >= 10) {
-                // Check if score beats OR TIES 10th place (index 9)
-                // Ties qualify because newer entries push down older ones
+              } else {
                 const tenthPlaceScore = highScores[9]?.score || 0;
                 isTop10 = score >= tenthPlaceScore;
               }
             }
 
-            console.log('Top 10 check:', { score, highScoresLength: highScores.length, tenthPlace: highScores[9]?.score, isTop10, highScores });
-
             if (isTop10) {
-              submitScoreIfNeeded(); // Shows name entry screen
-            } else {
-              scoreSubmitted = true; // Don't show name entry
+              showNameEntryForm();
             }
+            // If not top 10, do nothing - game over screen will show automatically
           } catch (e) {
             console.error('Failed to check high scores:', e);
-            // If fetch fails, assume they qualify to be safe
-            submitScoreIfNeeded();
+            showNameEntryForm(); // On error, show name entry to be safe
           }
         })();
       }
 
-      // Ensure any red/green/blue flash fades out properly during Game Over
       hitFlashTimer = Math.max(0, hitFlashTimer - dt);
       healFlashTimer = Math.max(0, healFlashTimer - dt);
       return;
@@ -1254,17 +1255,22 @@ export function createGame(canvas) {
         betweenTimer = 0.0;
       }
       // Stage 2: Apply bonus + animate until fully transferred
+      // Duration: 0.5s per level + 0.5s fixed (e.g., level 1 = 1.0s, level 2 = 1.5s, etc.)
       else if (betweenStage === 2) {
         if (!bonusApplied) {
           score += levelBonus; // apply full bonus to true score once
           bonusApplied = true;
         }
 
-        // When both scoreNumericDisplay and bonusDisplay reach their targets,
-        // we can move on to stage 3.
+        // Calculate dynamic duration based on level
+        const bonusTransferDuration = (betweenFromLevel * 0.5) + 0.5;
+
+        // When timer reaches calculated duration AND animation is complete, move to next stage
+        const timerDone = betweenTimer >= bonusTransferDuration;
         const scoreDone = Math.abs(score - scoreNumericDisplay) <= 0.5;
         const bonusDone = bonusDisplay <= 0.5;
-        if (scoreDone && bonusDone) {
+
+        if (timerDone && scoreDone && bonusDone) {
           scoreNumericDisplay = score;
           bonusDisplay = 0;
           betweenStage = 3;
@@ -1790,12 +1796,12 @@ export function createGame(canvas) {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(0, 0, w, h);
 
-        // Name entry panel - responsive sizing
+        // Name entry panel - positioned at TOP to avoid Android keyboard push-up
         const scale = Math.min(1, w / 400, h / 350); // Scale based on viewport
         const panelW = Math.min(500, w * 0.9);
-        const panelH = Math.min(280 * scale, h * 0.8);
+        const panelH = Math.min(280 * scale, h * 0.5); // Max 50% of height
         const panelX = (w - panelW) / 2;
-        const panelY = (h - panelH) / 2;
+        const panelY = Math.min(h * 0.1, 40); // Position near top, min 40px from top
 
         // Panel background
         ctx.fillStyle = 'rgba(30, 30, 50, 0.95)';
@@ -1837,9 +1843,10 @@ export function createGame(canvas) {
         ctx.lineWidth = 2;
         ctx.strokeRect(inputX, inputY, inputW, inputH);
 
-        // Name text
+        // Name text with blinking cursor
         ctx.fillStyle = '#fff';
-        ctx.font = `${Math.floor(18 * scale)}px monospace`;
+        const fontSize = Math.floor(18 * scale);
+        ctx.font = `${fontSize}px monospace`;
         ctx.textAlign = 'center';
         const displayName = playerName || '';
 
@@ -1848,8 +1855,24 @@ export function createGame(canvas) {
           nameInputEl.value = playerName;
         }
 
-        // Display name (no blinking cursor)
-        ctx.fillText(displayName, w * 0.5, inputY + inputH * 0.65);
+        // Text baseline Y position
+        const textBaselineY = inputY + inputH * 0.65;
+
+        // Display name
+        ctx.fillText(displayName, w * 0.5, textBaselineY);
+
+        // Blinking cursor (blinks every 0.5s)
+        const cursorVisible = (Date.now() % 1000) < 500;
+        if (cursorVisible) {
+          // Measure text width to position cursor
+          const textWidth = ctx.measureText(displayName).width;
+          const cursorX = w * 0.5 + textWidth / 2 + 4;
+          // Cursor should end at baseline, start above it by font size
+          const cursorY = textBaselineY - fontSize;
+          const cursorHeight = fontSize;
+          ctx.fillStyle = '#66d9ff';
+          ctx.fillRect(cursorX, cursorY, 2, cursorHeight);
+        }
 
         // Buttons (Skip on left, Submit on right per UX standards)
         const btnY = panelY + Math.floor(180 * scale);
@@ -1894,9 +1917,8 @@ export function createGame(canvas) {
         return;
       }
 
-      // Regular game over screen (only show after score is submitted or skipped)
-      // This ensures we don't see leaderboard until name entry is complete
-      if (scoreSubmitted) {
+      // Game over screen (show when NOT showing name entry)
+      if (!showNameEntry && gameOverTimer >= 2) {
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
         ctx.font = 'bold 32px system-ui, -apple-system, Segoe UI, Roboto, Arial';
@@ -1914,24 +1936,67 @@ export function createGame(canvas) {
         ctx.fillText('Leaderboard', w * 0.5, boardY);
         boardY += 26;
 
-        ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-
         if (!highScores || highScores.length === 0) {
+          ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
           ctx.fillText('No scores yet...', w * 0.5, boardY + 4);
         } else {
-          const maxRows = 10; // Show all top 10
+          const maxRows = 10;
           for (let i = 0; i < Math.min(highScores.length, maxRows); i++) {
             const row = highScores[i];
             const name = row.name ?? 'Anon';
             const s = row.score ?? 0;
             const line = `${i + 1}. ${name} - ${s}`;
+
+            // Highlight newly submitted entry with bold font
+            const isNewEntry = lastSubmittedName && name === lastSubmittedName;
+
+            // Draw sparkles around new entry
+            if (isNewEntry) {
+              const lineY = boardY + i * 20;
+              const time = Date.now() / 1000;
+
+              // Create 4 sparkles in 3D elliptical orbit
+              for (let j = 0; j < 4; j++) {
+                const angle = (time * 0.5 + j * Math.PI / 2) % TWO_PI;
+
+                // Horizontal position (left-right orbit)
+                const sparkleX = w * 0.5 + Math.cos(angle) * 120;
+
+                // Vertical position - center around text (offset -4 to center on name)
+                // Vertical ellipse is smaller to create 3D effect
+                const sparkleY = lineY - 4 + Math.sin(angle) * 6;
+
+                // Depth effect: size changes based on vertical position (rotated 90 degrees)
+                // When at top (sin < 0), sparkle gets smaller (going away)
+                // When at bottom (sin > 0), sparkle gets larger (coming closer)
+                const depthFactor = 1.0 - Math.sin(angle) * 0.4; // ranges from 0.6 to 1.4
+                const twinkle = Math.abs(Math.sin(time * 1.8 + j)); // Slowed by 40% (was 3, now 1.8)
+                const baseSize = 2 + twinkle * 1.5;
+                const size = baseSize * depthFactor;
+
+                // Opacity also affected by depth (further = more transparent)
+                const depthOpacity = 0.4 + depthFactor * 0.3; // ranges from 0.4 to 0.7
+
+                ctx.save();
+                ctx.fillStyle = `rgba(255, 215, 0, ${depthOpacity * twinkle})`;
+                ctx.beginPath();
+                ctx.arc(sparkleX, sparkleY, size, 0, TWO_PI);
+                ctx.fill();
+                ctx.restore();
+              }
+            }
+
+            ctx.font = isNewEntry
+              ? 'bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial'
+              : '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+
             ctx.fillText(line, w * 0.5, boardY + i * 20);
           }
         }
       }
 
-      // Restart button (only show after score is submitted)
-      if (scoreSubmitted && gameOverTimer >= 1.0) {
+      // Restart button (only show when game over screen is visible)
+      if (!showNameEntry && gameOverTimer >= 2) {
         restartBtn.w = 220;
         restartBtn.h = 48;
         restartBtn.x = w * 0.5 - restartBtn.w / 2;
