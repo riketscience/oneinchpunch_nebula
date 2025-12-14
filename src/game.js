@@ -27,6 +27,9 @@ export function createGame(canvas) {
   const W = () => canvas.clientWidth;
   const H = () => canvas.clientHeight;
 
+  let lastW = Math.max(1, W());
+  let lastH = Math.max(1, H());
+
   // Hidden input for mobile keyboard support
   const nameInputEl = document.getElementById('nameInput');
 
@@ -644,10 +647,17 @@ export function createGame(canvas) {
     }
 
     if (phase === 'startCountdown') {
+      const isMazeLevel = (levels[levelIndex] || levels[0]).type === 'maze';
+      const countdownTotal = 3.0;
+      const shrinkDuration = 0.35;
+
       startCountdownTimer += dt;
-      if (startCountdownStage === 0 && startCountdownTimer >= 3.0) {
-        startCountdownStage = 1;
-        startCountdownTimer = 0.0;
+      if (startCountdownStage === 0) {
+        const stageDuration = countdownTotal + (isMazeLevel ? shrinkDuration : 0);
+        if (startCountdownTimer >= stageDuration) {
+          startCountdownStage = 1;
+          startCountdownTimer = 0.0;
+        }
       } else if (startCountdownStage === 1 && startCountdownTimer >= 1.5) {
         phase = 'playing';
         return;
@@ -1298,17 +1308,30 @@ export function createGame(canvas) {
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
 
+      const isMazeLevel = (levels[levelIndex] || levels[0]).type === 'maze';
+      const countdownTotal = 3.0;
+      const shrinkDuration = 0.35;
+
       if (startCountdownStage === 0) {
-        const total = 3.0;
-        const t = clamp(startCountdownTimer, 0, total);
-        const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
-        const text = String(remaining);
+        const t = Math.min(startCountdownTimer, countdownTotal);
+        const remainingRaw = countdownTotal - startCountdownTimer;
+        const shrinkElapsed = Math.max(0, startCountdownTimer - countdownTotal);
+        const shrinkProgress = isMazeLevel ? clamp(shrinkElapsed / shrinkDuration, 0, 1) : 0;
+        const countdownNumber = (isMazeLevel && shrinkProgress > 0)
+          ? '0'
+          : String(Math.max(1, Math.ceil(Math.max(0, remainingRaw))));
+
         const pulse = 1.0 + 0.25 * (1 - (t % 1.0));
+        const shrinkScale = 1 - shrinkProgress;
+        const scale = pulse * shrinkScale;
+        const alpha = 1 - shrinkProgress;
+
         ctx.save();
         ctx.translate(w * 0.5, h * 0.5);
-        ctx.scale(pulse, pulse);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
         ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillText(text, 0, 20);
+        ctx.fillText(countdownNumber, 0, 20);
         ctx.restore();
       } else if (startCountdownStage === 1) {
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
@@ -1678,9 +1701,46 @@ export function createGame(canvas) {
   }
 
   // --- Resize ---
-  function onResize() {
-    ship.x = clamp(ship.x, 0, W());
-    ship.y = clamp(ship.y, 0, H());
+  function onResize(newW, newH) {
+    const w = Number.isFinite(newW) ? newW : W();
+    const h = Number.isFinite(newH) ? newH : H();
+    if (!w || !h) return;
+
+    const scaleX = lastW ? w / lastW : 1;
+    const scaleY = lastH ? h / lastH : 1;
+
+    if (scaleX !== 1 || scaleY !== 1) {
+      ship.x *= scaleX;
+      ship.y *= scaleY;
+
+      for (const b of bodies) {
+        b.x *= scaleX;
+        b.y *= scaleY;
+      }
+
+      for (const f of fragments) {
+        f.x *= scaleX;
+        f.y *= scaleY;
+      }
+
+      if (wormhole) {
+        wormhole.x *= scaleX;
+        wormhole.y *= scaleY;
+      }
+
+      // Keep maze grid math in sync with the current viewport
+      const mazeInfo = getMazeData();
+      if (mazeInfo) {
+        mazeInfo.width = w;
+        mazeInfo.height = h;
+      }
+    }
+
+    lastW = w;
+    lastH = h;
+
+    ship.x = clamp(ship.x, 0, w);
+    ship.y = clamp(ship.y, 0, h);
   }
 
   // Sync hidden input with playerName for mobile keyboard

@@ -11,6 +11,18 @@ let mazeData = { exitCol: 0, exitRow: 8, cellW: 0, cellH: 0, startX: 0, startY: 
 // Grid layout: 5 columns x 9 rows, top-left to bottom-right
 const MAZE_GRID = [
   [0b1010, 0b1010, 0b1010, 0b1010, 0b1100],
+  [0b0001, 0b0010, 0b0010, 0b0010, 0b0100],
+  [0b0011, 0b0010, 0b0100, 0b0001, 0b1100],
+  [0b0001, 0b0110, 0b0101, 0b0011, 0b0100],
+  [0b0101, 0b0001, 0b0000, 0b0100, 0b0101],
+  [0b0101, 0b0011, 0b0000, 0b0110, 0b0101],
+  [0b0001, 0b0100, 0b0001, 0b0010, 0b0110],
+  [0b0011, 0b0110, 0b0011, 0b0010, 0b0100],
+  [0b0001, 0b0010, 0b0010, 0b0010, 0b0110],
+];
+
+const MAZE_GRID_Doubled_coords = [
+  [0b1010, 0b1010, 0b1010, 0b1010, 0b1100],
   [0b1001, 0b1010, 0b1010, 0b1010, 0b0110],
   [0b0011, 0b1010, 0b1100, 0b1001, 0b1100],
   [0b1001, 0b1110, 0b0101, 0b0011, 0b0100],
@@ -133,9 +145,11 @@ export function renderMaze(ctx, W, H, phase) {
 
   const w = W();
   const h = H();
+  const time = performance.now() * 0.001;
+  const alpha = 0.7 + 0.2 * Math.sin(Math.PI * time); // 0.5 -> 0.9 over 2s
 
   ctx.save();
-  ctx.strokeStyle = '#00ccff'; // Bright blue
+  ctx.strokeStyle = `rgba(0, 204, 255, ${alpha})`; // Bright blue with throb
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
 
