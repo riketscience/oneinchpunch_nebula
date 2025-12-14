@@ -204,7 +204,7 @@ export function createGame(canvas) {
   function hardRestartGame() {
     levelIndex = 0;
     lives = test_vars.test_DEATH ? 0 : 2;
-    energy = test_vars.test_DEATH ? 0.3 : 1.0;
+    energy = test_vars.test_DEATH ? 1.0 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
