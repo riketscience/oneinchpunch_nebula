@@ -6,45 +6,18 @@ import { SHIP_RADIUS, HEALTH_RADIUS, OBJECT_SCALE } from './config.js';
 // Maze state
 let mazeWalls = [];
 let mazeData = { exitCol: 0, exitRow: 8, cellW: 0, cellH: 0, startX: 0, startY: 0 };
-
-// Maze grid definition
-// Grid layout: 5 columns x 9 rows, top-left to bottom-right
-const MAZE_GRID = [
-  [0b1010, 0b1010, 0b1010, 0b1010, 0b1100],
-  [0b0001, 0b0010, 0b0010, 0b0010, 0b0100],
-  [0b0011, 0b0010, 0b0100, 0b0001, 0b1100],
-  [0b0001, 0b0110, 0b0101, 0b0011, 0b0100],
-  [0b0101, 0b0001, 0b0000, 0b0100, 0b0101],
-  [0b0101, 0b0011, 0b0000, 0b0110, 0b0101],
-  [0b0001, 0b0100, 0b0001, 0b0010, 0b0110],
-  [0b0011, 0b0110, 0b0011, 0b0010, 0b0100],
-  [0b0001, 0b0010, 0b0010, 0b0010, 0b0110],
-];
-
-const MAZE_GRID_Doubled_coords = [
-  [0b1010, 0b1010, 0b1010, 0b1010, 0b1100],
-  [0b1001, 0b1010, 0b1010, 0b1010, 0b0110],
-  [0b0011, 0b1010, 0b1100, 0b1001, 0b1100],
-  [0b1001, 0b1110, 0b0101, 0b0011, 0b0100],
-  [0b0101, 0b1001, 0b0000, 0b1100, 0b0101],
-  [0b0101, 0b0011, 0b0000, 0b0110, 0b0101],
-  [0b0001, 0b1100, 0b0001, 0b1010, 0b0110],
-  [0b0011, 0b0110, 0b0011, 0b1010, 0b1100],
-  [0b1001, 0b1010, 0b1010, 0b1010, 0b0110],
-];
-
-// Maze item placements (col, row, type)
-// Items are placed at the CENTER of the specified grid cell
-const MAZE_ITEMS = [
-  { col: 3, row: 3, type: 'health' },  // Health pack in cell [0,2]
-];
+let currentMazeConfig = null; // Store current maze configuration
 
 /**
  * Initialize maze walls based on grid definition
+ * @param {Object} mazeConfig - Maze configuration object with grid, entry, exit, items
  * @param {Function} W - Canvas width getter
  * @param {Function} H - Canvas height getter
  */
-export function initMaze(W, H) {
+export function initMaze(mazeConfig, W, H) {
+  // Store current maze configuration
+  currentMazeConfig = mazeConfig;
+
   // Playable area starts below UI bars (topY = 32, barH = 12, so ~50px from top)
   const uiHeight = 50;
   const playableTop = uiHeight / H();
@@ -54,8 +27,9 @@ export function initMaze(W, H) {
   const insetX = 3 / W();
   const insetY = 3 / H();
 
-  const cols = 5;
-  const rows = MAZE_GRID.length;
+  const grid = mazeConfig.grid;
+  const cols = grid[0].length;
+  const rows = grid.length;
   mazeWalls = [];
 
   // Calculate cell dimensions with inset
@@ -71,8 +45,10 @@ export function initMaze(W, H) {
   const w = W();
   const h = H();
   mazeData = {
-    exitCol: 0,      // bottom-left square (column 0)
-    exitRow: 8,      // bottom-left square (row 8)
+    exitCol: mazeConfig.exit.col,
+    exitRow: mazeConfig.exit.row,
+    entryCol: mazeConfig.entry.col,
+    entryRow: mazeConfig.entry.row,
     cellW: cellW,
     cellH: cellH,
     startX: startX,
@@ -84,7 +60,7 @@ export function initMaze(W, H) {
   // Convert grid to wall segments
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const walls = MAZE_GRID[row][col];
+      const walls = grid[row][col];
       const x = startX + col * cellW;
       const y = startY + row * cellH;
 
@@ -270,10 +246,12 @@ export function clearMaze() {
  * @param {Function} H - Canvas height getter
  */
 export function spawnMazeItems(bodies, W, H) {
+  if (!currentMazeConfig || !currentMazeConfig.items) return;
+
   const w = W();
   const h = H();
 
-  for (const item of MAZE_ITEMS) {
+  for (const item of currentMazeConfig.items) {
     if (item.type === 'health') {
       const radius = HEALTH_RADIUS * OBJECT_SCALE;
 

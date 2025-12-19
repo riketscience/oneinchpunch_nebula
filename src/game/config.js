@@ -86,7 +86,18 @@ export const levelStartQuotes = [
 
 // --- Level Definitions ---
 export const levels = [
-  // Level 1: Maze challenge
+  // Level 1: Maze challenge (4x9 grid)
+  // Level 2: Normal gameplay
+  {
+    scoreGoal: test_vars.test_EOL ? 25 : 200,
+    coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
+    typeBoost: {
+      coin: { grav: 1.0, speed: 1.0 },
+      hazard: { grav: 1.0, speed: 1.0 },
+      elite: { grav: 1.0, speed: 1.0 },
+    },
+  },
   {
     type: 'maze',
     scoreGoal: test_vars.test_EOL ? 10 : 100,
@@ -97,16 +108,23 @@ export const levels = [
       hazard: { grav: 1.0, speed: 1.0 },
       elite: { grav: 1.0, speed: 1.0 },
     },
-  },
-  // Level 2: Normal gameplay
-  {
-    scoreGoal: test_vars.test_EOL ? 25 : 200,
-    coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
-    typeBoost: {
-      coin: { grav: 1.0, speed: 1.0 },
-      hazard: { grav: 1.0, speed: 1.0 },
-      elite: { grav: 1.0, speed: 1.0 },
+    mazeConfig: {
+      // Grid layout: 4 columns x 9 rows (including empty rows for entry/exit)
+      // Binary encoding: top(8), right(4), bottom(2), left(1)
+      grid: [
+        [0b1001, 0b1001, 0b1010, 0b1100],
+        [0b0001, 0b0010, 0b0001, 0b0110],
+        [0b1011, 0b0010, 0b0000, 0b0101],
+        [0b0001, 0b0010, 0b0000, 0b0101],
+        [0b0101, 0b0000, 0b0110, 0b0100],
+        [0b0101, 0b0010, 0b0000, 0b0100],
+        [0b0011, 0b0010, 0b0011, 0b0110],
+      ],
+      entry: { col: 0, row: 0 },  // Top-left of empty row
+      exit: { col: 1, row: 6 },   // Bottom-left square (exit vortex position)
+      items: [
+        { col: 3, row: 2, type: 'health' },  // Health pack in maze
+      ],
     },
   },
   {
@@ -127,6 +145,39 @@ export const levels = [
       coin: { grav: 1.22, speed: 1.22 },
       hazard: { grav: 1.22, speed: 1.22 },
       elite: { grav: 1.22, speed: 1.22 },
+    },
+  },
+  // Level 5: Second maze challenge (5x9 grid - larger maze)
+  {
+    type: 'maze',
+    scoreGoal: test_vars.test_EOL ? 15 : 150,
+    coinHazardSpawnRatio: 0,
+    healthSpawnInterval: 999999,
+    typeBoost: {
+      coin: { grav: 1.0, speed: 1.0 },
+      hazard: { grav: 1.0, speed: 1.0 },
+      elite: { grav: 1.0, speed: 1.0 },
+    },
+    mazeConfig: {
+      // Grid layout: 5 columns x 9 rows (larger maze with more complexity)
+      // Binary encoding: top(8), right(4), bottom(2), left(1)
+      grid: [
+        [0b1010, 0b1010, 0b1010, 0b1010, 0b1100],
+        [0b0001, 0b0010, 0b0010, 0b0010, 0b0100],
+        [0b0011, 0b0010, 0b0100, 0b0001, 0b1100],
+        [0b0001, 0b0110, 0b0101, 0b0011, 0b0100],
+        [0b0101, 0b0001, 0b0000, 0b0100, 0b0101],
+        [0b0101, 0b0011, 0b0000, 0b0110, 0b0101],
+        [0b0001, 0b0100, 0b0001, 0b0010, 0b0110],
+        [0b0011, 0b0110, 0b0011, 0b0010, 0b0100],
+        [0b0001, 0b0010, 0b0010, 0b0010, 0b0110],
+      ],
+      entry: { col: 0, row: 0 },  // Top-left corner
+      exit: { col: 4, row: 8 },   // Bottom-right corner (diagonal traverse)
+      items: [
+        { col: 2, row: 2, type: 'health' },  // Health pack mid-upper area
+        { col: 3, row: 5, type: 'health' },  // Health pack mid-lower area
+      ],
     },
   },
   {

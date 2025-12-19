@@ -172,12 +172,12 @@ export function createGame(canvas) {
     mazeTimer = 60.0; // Reset maze timer
 
     // Initialize maze first if this is a maze level (needed for ship positioning)
-    if (cfg.type === 'maze') {
-      initMaze(W, H);
+    if (cfg.type === 'maze' && cfg.mazeConfig) {
+      initMaze(cfg.mazeConfig, W, H);
       const mazeData = getMazeData();
-      // Position ship in center of top-left square (row 0, col 0)
-      ship.x = mazeData.width * (mazeData.startX + mazeData.cellW * 0.5);
-      ship.y = mazeData.height * (mazeData.startY + mazeData.cellH * 0.5);
+      // Position ship at entry position
+      ship.x = mazeData.width * (mazeData.startX + mazeData.entryCol * mazeData.cellW + mazeData.cellW * 0.5);
+      ship.y = mazeData.height * (mazeData.startY + mazeData.entryRow * mazeData.cellH + mazeData.cellH * 0.5);
       // Spawn maze items (health packs, etc.)
       spawnMazeItems(bodies, W, H);
       // Spawn exit vortex immediately for maze levels (after wormhole vars are reset)
