@@ -1,2 +1,21 @@
-html, body { margin: 0; padding: 0; height: 100%; background: #000; color: #fff; }
-#game { display: block; width: 100vw; height: 100vh; touch-action: none; }
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+  color: #fff;
+  /* Prevent iOS text selection and callout */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+  /* Prevent iOS context menu */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}

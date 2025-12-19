@@ -1,86 +1,37 @@
 import { submitHighScore, fetchHighScores } from './supabaseClient.js';
+import {
+  game_title,
+  test_vars,
+  TWO_PI,
+  SHIP_RADIUS,
+  ANGULAR_VEL,
+  HUD_SAFE_BOTTOM,
+  SPAWN_INTERVAL,
+  DEFAULT_HEALTH_FREQUENCY,
+  ENEMY_DAMAGE,
+  HEAL_FLASH_TOTAL,
+  levelStartQuotes,
+  levels,
+} from './game/config.js';
+import { initMaze, renderMaze, checkMazeCollision, getMazeData, spawnMazeItems, clearMaze } from './game/maze.js';
+import {
+  applyAttraction,
+  integrate,
+  handleBodyMerges,
+  handleHealthHazardCollisions,
+  handleCollisions as physicsHandleCollisions,
+} from './game/physics.js';
+import { spawnBody, spawnHealthPickup } from './game/entities.js';
 
 export function createGame(canvas) {
   const W = () => canvas.clientWidth;
   const H = () => canvas.clientHeight;
 
+  let lastW = Math.max(1, W());
+  let lastH = Math.max(1, H());
+
   // Hidden input for mobile keyboard support
   const nameInputEl = document.getElementById('nameInput');
-
-  // Environment-based configuration
-  const isTestEnv = import.meta.env.VITE_ENV === 'test';
-  const game_title = isTestEnv ? 'Nebula (test)' : 'Nebula';
-  const test_vars = isTestEnv ? {
-    test_EOL: false,
-    test_DEATH: true,
-  } : {
-    test_EOL: false,
-    test_DEATH: false,
-  };
-
-  // --- Constants ---
-  const TWO_PI = Math.PI * 2;
-  const SHIP_RADIUS = 14;
-
-  // HUD_SAFE_BOTTOM: bottom of HUD/UI zone (no ship / spawns above this)
-  const HUD_SAFE_BOTTOM = 64;
-
-  const COIN_IMPULSE = 28;       // how strongly a collected coin nudges the ship
-  const ENEMY_DAMAGE = 0.14;     // how much energy one enemy hit removes
-  const BUMP_DAMAGE = 0.02;      // how much energy one bump with wall removes
-  const SHIP_THRUST = 180;
-  const SHIP_DRAG = 0.98;
-  const ROT_PERIOD = 1.2;
-  const ANGULAR_VEL = (TWO_PI / ROT_PERIOD) * 0.95;
-  const ATTRACT_RADIUS = 220;    // base attract radius; coins use 75% of this visually
-  const GRAVITY_K = 180;
-  const SHIP_GRAVITY_FACTOR = 0.25;
-  const MAX_BODIES = 40;
-  const SPAWN_INTERVAL = 2.4;
-  const COIN_RADIUS = 8;
-  const HAZARD_RADIUS = 11;
-  const OBJECT_SCALE = 0.6;
-
-  // Health pickup (white circle with red cross)
-  const HEALTH_RADIUS = 10; // size only; spawn interval is per-level
-  const HEALTH_SPEED = 40;
-  const HEALTH_ATTRACT_MULT = 0.75; // 25% less attraction than default
-
-  // Previously ~20–40s; now push it ~20s later on average: ~40–60s
-  const DEFAULT_HEALTH_FREQUENCY = Math.floor(Math.random() * 20) + 40;
-
-  // Heal flash timing (for double flash)
-  const HEAL_FLASH_TOTAL = 0.25; // total duration of double flash
-
-  // Level start quotes
-  const levelStartQuotes = [
-    'Are you ready...',
-    'Break a leg...',
-    'Time to kick ass...',
-    'Let\'s do this...',
-    'Watch and learn...',
-    'Brace yourself...',
-    'Show \'em how it\'s done...',
-    'Let\'s make it look easy...',
-    'Piece o\' cake...',
-    'Here we go...',
-    'You got this....',
-    'Y\'all ready for this...',
-    'Let\'s crush it...',
-    'Let\'s GO!',
-    'Get ready...',
-    'Make it so...',
-    'Never quit...',
-    'Hold tight...',
-    'Prepare for battle...',
-  ];
-
-  // Ship collision triangle in local ship coordinates (approx)
-  const SHIP_TRI_LOCAL = [
-    { x: SHIP_RADIUS, y: 0 },
-    { x: -SHIP_RADIUS * 0.7, y: SHIP_RADIUS * 0.6 },
-    { x: -SHIP_RADIUS * 0.7, y: -SHIP_RADIUS * 0.6 },
-  ];
 
   // --- Ship state ---
   const ship = {
@@ -105,69 +56,7 @@ export function createGame(canvas) {
   let spawnTimer = 0;
   let healthSpawnTimer = 0;
 
-  // --- Levels ---
-  const levels = [
-    {
-      scoreGoal: test_vars.test_EOL ? 25 : 200,
-      coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,  // (not used yet)
-      typeBoost: {
-        coin: { grav: 1.0, speed: 1.0 },
-        hazard: { grav: 1.0, speed: 1.0 },
-        elite: { grav: 1.0, speed: 1.0 },
-      },
-    },
-    {
-      scoreGoal: 250,
-      coinHazardSpawnRatio: 0.66,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
-      typeBoost: {
-        coin: { grav: 1.1, speed: 1.1 },
-        hazard: { grav: 1.1, speed: 1.1 },
-        elite: { grav: 1.1, speed: 1.1 },
-      },
-    },
-    {
-      scoreGoal: 300,
-      coinHazardSpawnRatio: 0.62,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
-      typeBoost: {
-        coin: { grav: 1.22, speed: 1.22 },
-        hazard: { grav: 1.22, speed: 1.22 },
-        elite: { grav: 1.22, speed: 1.22 },
-      },
-    },
-    {
-      scoreGoal: 350,
-      coinHazardSpawnRatio: 0.58,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
-      typeBoost: {
-        coin: { grav: 1.34, speed: 1.34 },
-        hazard: { grav: 1.34, speed: 1.34 },
-        elite: { grav: 1.34, speed: 1.34 },
-      },
-    },
-    {
-      scoreGoal: 400,
-      coinHazardSpawnRatio: 0.54,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
-      typeBoost: {
-        coin: { grav: 1.45, speed: 1.45 },
-        hazard: { grav: 1.45, speed: 1.45 },
-        elite: { grav: 1.45, speed: 1.45 },
-      },
-    },
-    {
-      scoreGoal: 450,
-      coinHazardSpawnRatio: 0.5,
-      healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
-      typeBoost: {
-        coin: { grav: 1.5, speed: 1.5 },
-        hazard: { grav: 1.5, speed: 1.5 },
-        elite: { grav: 1.5, speed: 1.5 },
-      },
-    },
-  ];
+  // --- Level state ---
   let levelIndex = 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
 
@@ -190,6 +79,9 @@ export function createGame(canvas) {
   let levelBonus = 0;
   let bonusDisplay = 0; // animated bonus countdown (starts at levelBonus, goes to 0)
   let bonusApplied = false;
+
+  // --- Maze timer (for testing/stats) ---
+  let mazeTimer = 60.0; // Stopwatch for maze completion time
 
   // --- Energy, lives, respawn, hit feedback ---
   let energy = !test_vars.test_DEATH ? 1.0 : 0.3;
@@ -226,6 +118,8 @@ export function createGame(canvas) {
   let isSubmittingScore = false; // prevent duplicate submissions
   const submitNameBtn = { x: 0, y: 0, w: 180, h: 44 };
   const skipBtn = { x: 0, y: 0, w: 140, h: 44 };
+  let nameEntryWobble = 0; // Wobble offset for form validation feedback
+  const MAX_NAME_LENGTH = 15;
 
   // --- Wormhole state ---
   let wormhole = null;
@@ -239,6 +133,12 @@ export function createGame(canvas) {
   // --- Helpers ---
   function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
   function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+
+  function getOrdinal(n) {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
 
   function applyLevelBoost(body) {
     const cfg = levels[levelIndex] || levels[0];
@@ -257,18 +157,7 @@ export function createGame(canvas) {
     const cfg = levels[levelIndex] || levels[0];
     scoreGoal = cfg.scoreGoal;
 
-    ship.x = W() * 0.5;
-    ship.y = H() * 0.5;
-    ship.vx = 0; ship.vy = 0;
-    ship.angle = -Math.PI / 2;
-    ship.state = "rotating";
-    ship.thrustDir = ship.angle;
-    ship.alive = true;
-
-    // Do NOT reset global score between levels
-    warpScore = 0;
-    scoreDisplay = warpScore;
-
+    // Reset game state first
     spawnTimer = 0;
     healthSpawnTimer = 0;
     fragments = [];
@@ -278,6 +167,33 @@ export function createGame(canvas) {
     wormholeActive = false;
     wormhole = null;
     bodies = [];
+    warpScore = 0;
+    scoreDisplay = warpScore;
+    mazeTimer = 60.0; // Reset maze timer
+
+    // Initialize maze first if this is a maze level (needed for ship positioning)
+    if (cfg.type === 'maze' && cfg.mazeConfig) {
+      initMaze(cfg.mazeConfig, W, H);
+      const mazeData = getMazeData();
+      // Position ship at entry position
+      ship.x = mazeData.width * (mazeData.startX + mazeData.entryCol * mazeData.cellW + mazeData.cellW * 0.5);
+      ship.y = mazeData.height * (mazeData.startY + mazeData.entryRow * mazeData.cellH + mazeData.cellH * 0.5);
+      // Spawn maze items (health packs, etc.)
+      spawnMazeItems(bodies, W, H);
+      // Spawn exit vortex immediately for maze levels (after wormhole vars are reset)
+      spawnWormhole();
+    } else {
+      // Clear maze walls when transitioning to non-maze level
+      clearMaze();
+      ship.x = W() * 0.5;
+      ship.y = H() * 0.5;
+    }
+
+    ship.vx = 0; ship.vy = 0;
+    ship.angle = -Math.PI / 2;
+    ship.state = "rotating";
+    ship.thrustDir = ship.angle;
+    ship.alive = true;
   }
 
   async function loadHighScores() {
@@ -291,7 +207,7 @@ export function createGame(canvas) {
   function hardRestartGame() {
     levelIndex = 0;
     lives = test_vars.test_DEATH ? 0 : 2;
-    energy = test_vars.test_DEATH ? 0.3 : 1.0;
+    energy = test_vars.test_DEATH ? 1.0 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -398,347 +314,10 @@ export function createGame(canvas) {
     }
   }
 
-  // --- Spawning (coins/hazards) ---
-  function spawnBody() {
-    if (bodies.length >= MAX_BODIES) return;
-
-    const levelCfg = levels[levelIndex] || levels[0];
-    const ratio = levelCfg.coinHazardSpawnRatio ?? 0.7;
-    const type = Math.random() < ratio ? "coin" : "hazard";
-
-    const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
-    const radius = baseRadius * OBJECT_SCALE;
-
-    const futureT = 0.25;
-    const projX = ship.x + ship.vx * futureT;
-    const projY = ship.y + ship.vy * futureT;
-    const SAFE_MARGIN = SHIP_RADIUS + radius + 20;
-
-    let x, y, tries = 0;
-    while (tries < 30) {
-      x = Math.random() * W();
-      y = Math.random() * H();
-
-      // avoid HUD zone at the top
-      if (y < HUD_SAFE_BOTTOM + radius + 8) { tries++; continue; }
-
-      const dxNow = x - ship.x, dyNow = y - ship.y;
-      const dxFuture = x - projX, dyFuture = y - projY;
-      const safeNow = (dxNow * dxNow + dyNow * dyNow) > SAFE_MARGIN * SAFE_MARGIN;
-      const safeFuture = (dxFuture * dxFuture + dyFuture * dyFuture) > SAFE_MARGIN * SAFE_MARGIN;
-      if (safeNow && safeFuture) break;
-      tries++;
-    }
-
-    const body = {
-      type,
-      radius,
-      x,
-      y,
-      vx: 0,
-      vy: 0,
-      gravMult: 1,
-      attractMul: 1,
-      speedMul: 1,
-      spawnTime: 0.0,   // animation timer (0 to spawnDuration)
-      spawnDuration: 0.8
-    };
-    applyLevelBoost(body);
-    bodies.push(body);
-  }
-
-  // --- Spawning (health pickup) ---
-  function spawnHealthPickup() {
-    const radius = HEALTH_RADIUS * OBJECT_SCALE;
-
-    // Spawn just *inside* the visible area on left or right, heading toward play-area center
-    const side = Math.random() < 0.5 ? 'left' : 'right';
-
-    let x;
-    if (side === 'left') {
-      x = radius + 2;           // near left edge, fully visible
-    } else {
-      x = W() - radius - 2;     // near right edge, fully visible
-    }
-
-    const yMin = HUD_SAFE_BOTTOM + radius + 8;
-    const yMax = H() - radius - 8;
-    const yRange = Math.max(10, yMax - yMin);
-    let y = yMin + Math.random() * yRange;
-
-    const cx = W() * 0.5;
-    const cy = H() * 0.5;
-    let dx = cx - x;
-    let dy = cy - y;
-    let d = Math.sqrt(dx * dx + dy * dy) || 1;
-    dx /= d;
-    dy /= d;
-
-    const body = {
-      type: 'health',
-      radius,
-      x,
-      y,
-      vx: dx * HEALTH_SPEED,
-      vy: dy * HEALTH_SPEED,
-      gravMult: 1.0,
-      attractMul: HEALTH_ATTRACT_MULT, // 25% weaker attraction
-      speedMul: 1.0,
-      spawnTime: 0.0,
-      spawnDuration: 0.5
-    };
-
-    console.log('Spawned health pickup at', x, y);
-    bodies.push(body);
-  }
-
-  // --- Gravity / movement ---
-  function applyAttraction(dt) {
-    for (let i = bodies.length - 1; i >= 0; i--) {
-      const b = bodies[i];
-
-      // Coins attract from 25% closer distance than other bodies
-      let baseRadius = ATTRACT_RADIUS;
-      if (b.type === 'coin') baseRadius *= 0.75;
-
-      const localRadius = baseRadius * (b.attractMul || 1);
-      const r2 = localRadius * localRadius;
-
-      const dx = b.x - ship.x;
-      const dy = b.y - ship.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < r2 && d2 > 1) {
-        const d = Math.sqrt(d2);
-        const ux = dx / d, uy = dy / d;
-        const falloff = 1 - (d / localRadius);
-        const force = GRAVITY_K * falloff * (b.gravMult || 1);
-        b.vx -= ux * force * dt * (b.speedMul || 1);
-        b.vy -= uy * force * dt * (b.speedMul || 1);
-        ship.vx += ux * force * dt * SHIP_GRAVITY_FACTOR * (b.gravMult || 1);
-        ship.vy += uy * force * dt * SHIP_GRAVITY_FACTOR * (b.gravMult || 1);
-      }
-    }
-  }
-
-  function integrate(dt) {
-    if (ship.state === "thrusting") {
-      ship.vx += Math.cos(ship.thrustDir) * SHIP_THRUST * dt;
-      ship.vy += Math.sin(ship.thrustDir) * SHIP_THRUST * dt;
-    } else {
-      const frames = clamp(dt * 60, 0, 5);
-      ship.vx *= Math.pow(SHIP_DRAG, frames);
-      ship.vy *= Math.pow(SHIP_DRAG, frames);
-      ship.angle += ship.angularVel * dt;
-      if (ship.angle > Math.PI) ship.angle -= TWO_PI;
-    }
-
-    ship.x += ship.vx * dt;
-    ship.y += ship.vy * dt;
-
-    const minX = SHIP_RADIUS;
-    const maxX = W() - SHIP_RADIUS;
-    const minY = HUD_SAFE_BOTTOM + SHIP_RADIUS / 4;
-    const maxY = H() - SHIP_RADIUS;
-    const BOUNCE_DAMP = 0.95;
-
-    if (ship.x < minX) {
-      ship.x = minX;
-      ship.vx = -ship.vx * BOUNCE_DAMP;
-      energy -= BUMP_DAMAGE;
-      // Short subtle flash for wall bump
-      hitFlashColor = 'rgba(255,60,60,';
-      hitFlashTimer = 0.05;
-      if (energy <= 0 && ship.alive) {
-        energy = 0;
-        triggerExplosion();
-      }
-    }
-    if (ship.x > maxX) {
-      ship.x = maxX;
-      ship.vx = -ship.vx * BOUNCE_DAMP;
-      energy -= BUMP_DAMAGE;
-      // Short subtle flash for wall bump
-      hitFlashColor = 'rgba(255,60,60,';
-      hitFlashTimer = 0.05;
-      if (energy <= 0 && ship.alive) {
-        energy = 0;
-        triggerExplosion();
-      }
-    }
-    if (ship.y < minY) {
-      ship.y = minY;
-      ship.vy = -ship.vy * BOUNCE_DAMP;
-      energy -= BUMP_DAMAGE;
-      // Short subtle flash for wall bump
-      hitFlashColor = 'rgba(255,60,60,';
-      hitFlashTimer = 0.05;
-      if (energy <= 0 && ship.alive) {
-        energy = 0;
-        triggerExplosion();
-      }
-    }
-    if (ship.y > maxY) {
-      ship.y = maxY;
-      ship.vy = -ship.vy * BOUNCE_DAMP;
-      energy -= BUMP_DAMAGE;
-      // Short subtle flash for wall bump
-      hitFlashColor = 'rgba(255,60,60,';
-      hitFlashTimer = 0.05;
-      if (energy <= 0 && ship.alive) {
-        energy = 0;
-        triggerExplosion();
-      }
-    }
-
-    for (const b of bodies) {
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-
-      // Update spawn animation timer
-      if (b.spawnTime !== undefined && b.spawnTime < b.spawnDuration) {
-        b.spawnTime += dt;
-      }
-    }
-  }
-
-  // --- Hazard merges (greens) ---
-  function handleBodyMerges() {
-    for (let i = bodies.length - 1; i >= 0; i--) {
-      const a = bodies[i];
-      if (a.type !== 'hazard') continue;
-      for (let j = i - 1; j >= 0; j--) {
-        const b = bodies[j];
-        if (b.type !== 'hazard') continue;
-        const minDist = a.radius + b.radius;
-        const dx = a.x - b.x, dy = a.y - b.y;
-        if (dx * dx + dy * dy <= minDist * minDist) {
-          const mA = a.radius * a.radius;
-          const mB = b.radius * b.radius;
-          const mTot = mA + mB || 1;
-          const vx = (a.vx * mA + b.vx * mB) / mTot;
-          const vy = (a.vy * mA + b.vy * mB) / mTot;
-          const newRadius = Math.max(a.radius, b.radius) * 1.15;
-          let green = {
-            type: 'hazard_elite',
-            radius: newRadius * OBJECT_SCALE,
-            x: (a.x * mA + b.x * mB) / mTot,
-            y: (a.y * mA + b.y * mB) / mTot,
-            vx: vx * 1.3,
-            vy: vy * 1.3,
-            gravMult: 1.3,
-            attractMul: 1.2,
-            speedMul: 1.3
-          };
-          applyLevelBoost(green);
-          bodies.splice(i, 1);
-          bodies.splice(j, 1);
-          bodies.push(green);
-          i = bodies.length;
-          break;
-        }
-      }
-    }
-  }
-
-  // --- Health vs hazard collisions (destroy health) ---
-  function handleHealthHazardCollisions() {
-    for (let i = bodies.length - 1; i >= 0; i--) {
-      const a = bodies[i];
-      if (a.type !== 'health' && a.type !== 'hazard' && a.type !== 'hazard_elite') continue;
-
-      for (let j = i - 1; j >= 0; j--) {
-        const b = bodies[j];
-        if (b.type !== 'health' && b.type !== 'hazard' && b.type !== 'hazard_elite') continue;
-
-        // One must be health, the other hazard / hazard_elite
-        const isHealthA = a.type === 'health';
-        const isHealthB = b.type === 'health';
-        const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite');
-        const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite');
-
-        if (!((isHealthA && isHazardB) || (isHealthB && isHazardA))) {
-          continue;
-        }
-
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const minDist = a.radius + b.radius;
-        if (dx * dx + dy * dy <= minDist * minDist) {
-          // Remove the health, keep the hazard
-          const healthIndex = isHealthA ? i : j;
-          bodies.splice(healthIndex, 1);
-          // Restart outer loop since array changed
-          i = bodies.length;
-          break;
-        }
-      }
-    }
-  }
-
-  // --- Triangle helpers for ship hitbox ---
-  function pointInTriangle(px, py, a, b, c) {
-    const v0x = c.x - a.x, v0y = c.y - a.y;
-    const v1x = b.x - a.x, v1y = b.y - a.y;
-    const v2x = px - a.x, v2y = py - a.y;
-
-    const dot00 = v0x * v0x + v0y * v0y;
-    const dot01 = v0x * v1x + v0y * v1y;
-    const dot02 = v0x * v2x + v0y * v2y;
-    const dot11 = v1x * v1x + v1y * v1y;
-    const dot12 = v1x * v2x + v1y * v2y;
-
-    const denom = dot00 * dot11 - dot01 * dot01;
-    if (denom === 0) return false;
-    const invDenom = 1 / denom;
-    const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-    return u >= 0 && v >= 0 && u + v <= 1;
-  }
-
-  function closestPointOnSegment(px, py, ax, ay, bx, by) {
-    const vx = bx - ax;
-    const vy = by - ay;
-    const wx = px - ax;
-    const wy = py - ay;
-    const len2 = vx * vx + vy * vy;
-    let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
-    if (t < 0) t = 0;
-    else if (t > 1) t = 1;
-    return {
-      x: ax + t * vx,
-      y: ay + t * vy,
-    };
-  }
-
-  function circleHitsShip(bx, by, br) {
-    // Transform circle center into ship-local coords (inverse rotate+translate)
-    const angle = (ship.state === "thrusting") ? ship.thrustDir : ship.angle;
-    const cosA = Math.cos(-angle);
-    const sinA = Math.sin(-angle);
-    const relX = bx - ship.x;
-    const relY = by - ship.y;
-    const lx = cosA * relX - sinA * relY;
-    const ly = sinA * relX + cosA * relY;
-
-    const a = SHIP_TRI_LOCAL[0];
-    const b = SHIP_TRI_LOCAL[1];
-    const c = SHIP_TRI_LOCAL[2];
-
-    // 1) If center is inside triangle, we collide
-    if (pointInTriangle(lx, ly, a, b, c)) return true;
-
-    // 2) Check distance to each edge
-    const r2 = br * br;
-    const edges = [[a, b], [b, c], [c, a]];
-    for (const [p, q] of edges) {
-      const cp = closestPointOnSegment(lx, ly, p.x, p.y, q.x, q.y);
-      const dx = lx - cp.x;
-      const dy = ly - cp.y;
-      if (dx * dx + dy * dy <= r2) return true;
-    }
-
-    return false;
-  }
+  // --- Gravity / movement (imported from physics.js) ---
+  // --- Physics functions (imported from physics.js) ---
+  // applyAttraction, integrate, handleBodyMerges, handleHealthHazardCollisions,
+  // circleHitsShip, handleCollisions - all in physics.js
 
   // --- Explosion / respawn / lives ---
   function triggerExplosion() {
@@ -775,6 +354,9 @@ export function createGame(canvas) {
       phase = 'gameOver';
       gameOverTimer = 0.0;
       respawnPending = false;
+
+      // Clear all bodies from playfield so they don't show behind game over screen
+      bodies = [];
 
       // Don't submit score immediately - wait for death animation (2s)
       // submitScoreIfNeeded will be called after delay in update loop
@@ -845,117 +427,39 @@ export function createGame(canvas) {
     }
   }
 
-  // --- Collisions (ship vs bodies, off-screen scoring) ---
-  function handleCollisions() {
-    // Ship vs bodies
-    for (let i = bodies.length - 1; i >= 0; i--) {
-      const b = bodies[i];
-
-      // Broad-phase: bounding circle test
-      const approxR = SHIP_RADIUS;
-      const minDist = approxR + b.radius;
-      if (dist2(ship.x, ship.y, b.x, b.y) > minDist * minDist) continue;
-
-      // Precise: circle vs ship triangle
-      if (!circleHitsShip(b.x, b.y, b.radius)) continue;
-
-      if (invulnTimer > 0 || !ship.alive || phase !== 'playing') continue;
-
-      if (b.type === "coin") {
-        // Warp gain
-        warpScore += 10;
-
-        // Score: gold = 100
-        score += 100;
-
-        // Coin impulse towards ship direction
-        const dx = ship.x - b.x;
-        const dy = ship.y - b.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const ux = dx / d, uy = dy / d;
-        ship.vx += ux * COIN_IMPULSE;
-        ship.vy += uy * COIN_IMPULSE;
-
-        bodies.splice(i, 1);
-      } else if (b.type === 'health') {
-        // Health pickup: boost energy by 0.2–0.3, clamp to 1.0
-        const delta = 0.2 + Math.random() * 0.1;
-        energy = clamp(energy + delta, 0, 1);
-
-        // Score: 200–300 (1000 * delta), rounded to nearest 10
-        let healthScore = Math.round((delta * 1000) / 10) * 10;
-        score += healthScore;
-
-        // trigger blue heal flash (double flash handled in render)
-        healFlashTimer = HEAL_FLASH_TOTAL;
-
-        bodies.splice(i, 1);
-      } else {
-        // Enemy hit (hazard / hazard_elite)
-        const isElite = b.type === 'hazard_elite';
-        bodies.splice(i, 1);
-
-        // Green elite deals double damage
-        energy -= isElite ? (ENEMY_DAMAGE * 2) : ENEMY_DAMAGE;
-
-        // Set flash color based on enemy type
-        hitFlashColor = isElite ? 'rgba(0,255,102,' : 'rgba(255,60,60,';
-        hitFlashTimer = 0.1;
-
-        if (energy <= 0 && ship.alive) {
-          energy = 0;
-          triggerExplosion();
-        } else {
-          // mild knockback when not dead
-          ship.vx *= -0.4;
-          ship.vy *= -0.4;
-        }
-        break;
-      }
-    }
-
-    // Remove offscreen bodies (hazards score when slung off-screen)
-    const M = 8;
-    const left = -M, top = -M;
-    const right = W() + M, bottom = H() + M;
-    const kept = [];
-    for (const b of bodies) {
-      const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
-      if (inside) {
-        kept.push(b);
-      } else if (b.type === 'hazard' || b.type === 'hazard_elite') {
-        // Only award points if score is not locked (not during wormhole capture)
-        if (!scoreLocked) {
-          // Green elite awards double points for slingshot
-          if (b.type === 'hazard') {
-            warpScore += 25;   // red
-            score += 250;      // red
-          } else {
-            warpScore += 50;   // green elite (double)
-            score += 500;      // green elite (double)
-          }
-        }
-      }
-      // coins/health going off-screen just vanish
-    }
-    bodies = kept;
-  }
 
   // --- Wormhole ---
   function spawnWormhole() {
-    const inset = 60;
-    let wx = ship.x < W() / 2 ? W() - inset : inset;
-    let wy = ship.y < H() / 2 ? H() - inset : inset;
+    const currentLevel = levels[levelIndex] || levels[0];
 
-    // If spawning in a top corner, push it down just below HUD with padding
-    const vortexPadding = 40;
-    if (wy < HUD_SAFE_BOTTOM + vortexPadding) {
-      wy = HUD_SAFE_BOTTOM + vortexPadding / 2;
+    if (currentLevel.type === 'maze') {
+      // Maze level: Spawn mini vortex in exit square (bottom-left)
+      // Center of cell [exitCol, exitRow]
+      const mazeData = getMazeData();
+      // Use current W()/H() instead of stored dimensions to avoid race condition
+      const w = W();
+      const h = H();
+      const wx = w * (mazeData.startX + mazeData.exitCol * mazeData.cellW + mazeData.cellW * 0.5);
+      const wy = h * (mazeData.startY + mazeData.exitRow * mazeData.cellH + mazeData.cellH * 0.5);
+      console.log(`Vortex at cell[${mazeData.exitCol},${mazeData.exitRow}]: (${wx.toFixed(1)}, ${wy.toFixed(1)})`);
+      console.log(`Cell size: ${(w * mazeData.cellW).toFixed(1)}x${(h * mazeData.cellH).toFixed(1)}`);
+      wormhole = { x: wx, y: wy, radius: 30, angle: 0 }; // Smaller radius for maze
+      wormholeActive = true;
+    } else {
+      // Normal level: Spawn in opposite corner from ship
+      const inset = 60;
+      let wx = ship.x < W() / 2 ? W() - inset : inset;
+      let wy = ship.y < H() / 2 ? H() - inset : inset;
+
+      // If spawning in a top corner, push it down just below HUD with padding
+      const vortexPadding = 40;
+      if (wy < HUD_SAFE_BOTTOM + vortexPadding) {
+        wy = HUD_SAFE_BOTTOM + vortexPadding / 2;
+      }
+
+      wormhole = { x: wx, y: wy, radius: 22, angle: 0 };
+      wormholeActive = true;
     }
-
-    // reduced radius by ~15% (26 → 22)
-    wormhole = { x: wx, y: wy, radius: 22, angle: 0 };
-    wormholeActive = true;
   }
 
   function updateWormhole(dt) {
@@ -965,17 +469,32 @@ export function createGame(canvas) {
     const dy = wormhole.y - ship.y;
     const d2 = dx * dx + dy * dy;
     const d = Math.sqrt(d2) || 1;
-    const ux = dx / d, uy = dy / d;
-    const pull = 90;
-    ship.vx += ux * pull * dt;
-    ship.vy += uy * pull * dt;
-    if (d <= wormhole.radius + SHIP_RADIUS * 0.8 && phase === 'playing') {
-      phase = 'captured';
-      captureTimer = 2.5;
-      ship.state = 'rotating';
-      scoreLocked = true; // Lock score during wormhole capture
-      // Snap UI score to actual score so end-of-level UI is correct
-      scoreNumericDisplay = score;
+
+    // Maze levels: No pull, just check proximity for capture
+    const currentLevel = levels[levelIndex] || levels[0];
+    if (currentLevel.type === 'maze') {
+      // Enter vortex when within 1/3 of ship's length
+      if (d <= SHIP_RADIUS * 2 && phase === 'playing') {
+        phase = 'captured';
+        captureTimer = 2.5;
+        ship.state = 'rotating';
+        scoreLocked = true;
+        scoreNumericDisplay = score;
+        console.log(`Maze completed in ${mazeTimer.toFixed(2)}s`);
+      }
+    } else {
+      // Normal levels: Pull ship towards vortex
+      const ux = dx / d, uy = dy / d;
+      const pull = 90;
+      ship.vx += ux * pull * dt;
+      ship.vy += uy * pull * dt;
+      if (d <= wormhole.radius + SHIP_RADIUS * 0.8 && phase === 'playing') {
+        phase = 'captured';
+        captureTimer = 2.5;
+        ship.state = 'rotating';
+        scoreLocked = true;
+        scoreNumericDisplay = score;
+      }
     }
   }
 
@@ -984,19 +503,21 @@ export function createGame(canvas) {
     ctx.save();
     ctx.translate(wormhole.x, wormhole.y);
 
-    const baseR = wormhole.radius;
+    const currentLevel = levels[levelIndex] || levels[0];
+    const isMaze = currentLevel.type === 'maze';
+    const baseR = isMaze ? wormhole.radius * 0.6 : wormhole.radius; // Smaller for maze
     const t = wormhole.angle;
 
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalCompositeOperation = 'lighter';
 
-    const rippleCount = 5;
+    const rippleCount = isMaze ? 3 : 5; // Fewer ripples for maze
     const innerOffset = -6;
-    const step = 8;
+    const step = isMaze ? 5 : 8; // Tighter ripples for maze
 
     for (let i = 0; i < rippleCount; i++) {
       const phase = t * 2.2 + i * 0.8;
-      const pulsate = Math.sin(phase) * 4;
+      const pulsate = Math.sin(phase) * (isMaze ? 2 : 4); // Less pulsation for maze
       const offset = innerOffset + i * step;
       const r = baseR + offset + pulsate;
 
@@ -1007,7 +528,8 @@ export function createGame(canvas) {
 
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, TWO_PI);
-      ctx.strokeStyle = `rgba(120,180,255,${alpha})`;
+      // Use brighter blue for maze exit vortex to match walls
+      ctx.strokeStyle = isMaze ? `rgba(0,204,255,${alpha})` : `rgba(120,180,255,${alpha})`;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -1096,10 +618,15 @@ export function createGame(canvas) {
       skipNameEntry();
     } else if (key === 'Backspace') {
       playerName = playerName.slice(0, -1);
-    } else if (key.length === 1 && playerName.length < 20) {
+    } else if (key.length === 1) {
       // Only allow printable characters
       if (key >= ' ' && key <= '~') {
-        playerName += key;
+        if (playerName.length >= MAX_NAME_LENGTH) {
+          // Trigger wobble effect when at max length
+          nameEntryWobble = 5; // 5px wobble amplitude
+        } else {
+          playerName += key;
+        }
       }
     }
   }
@@ -1120,10 +647,17 @@ export function createGame(canvas) {
     }
 
     if (phase === 'startCountdown') {
+      const isMazeLevel = (levels[levelIndex] || levels[0]).type === 'maze';
+      const countdownTotal = 3.0;
+      const shrinkDuration = 0.35;
+
       startCountdownTimer += dt;
-      if (startCountdownStage === 0 && startCountdownTimer >= 3.0) {
-        startCountdownStage = 1;
-        startCountdownTimer = 0.0;
+      if (startCountdownStage === 0) {
+        const stageDuration = countdownTotal + (isMazeLevel ? shrinkDuration : 0);
+        if (startCountdownTimer >= stageDuration) {
+          startCountdownStage = 1;
+          startCountdownTimer = 0.0;
+        }
       } else if (startCountdownStage === 1 && startCountdownTimer >= 1.5) {
         phase = 'playing';
         return;
@@ -1138,6 +672,11 @@ export function createGame(canvas) {
     if (phase === 'gameOver') {
       gameOverTimer += dt;
       updateFragments(dt);
+
+      // Decay wobble animation
+      if (nameEntryWobble > 0) {
+        nameEntryWobble = Math.max(0, nameEntryWobble - dt * 20); // Decay quickly
+      }
 
       // After death animation (2s), check if score qualifies for top 10
       if (gameOverTimer >= 2 && !nameEntryProcessed) {
@@ -1193,14 +732,21 @@ export function createGame(canvas) {
       if (ship.angle > Math.PI) ship.angle -= TWO_PI;
 
       // Keep existing bodies moving & interacting while captured
-      applyAttraction(dt);
+      applyAttraction(ship, bodies, dt, levelIndex, getMazeData);
       for (const b of bodies) {
         b.x += b.vx * dt;
         b.y += b.vy * dt;
       }
-      handleBodyMerges();
-      handleHealthHazardCollisions();
-      handleCollisions();
+      handleBodyMerges(bodies, applyLevelBoost);
+      handleHealthHazardCollisions(bodies);
+      const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+      warpScore = collResult.warpScore;
+      score = collResult.score;
+      energy = collResult.energy;
+      healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
+      hitFlashColor = collResult.hitFlashColor;
+      hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
+      if (collResult.shouldExplode) triggerExplosion();
       updateFragments(dt);
 
       captureTimer -= dt;
@@ -1215,7 +761,7 @@ export function createGame(canvas) {
         scoreNumericDisplay = score;
 
         // Calculate level completion bonus
-        levelBonus = 500 * betweenFromLevel;
+        levelBonus = levels[levelIndex].type === 'maze' ? 10 * Math.floor(mazeTimer * 10) : 500 * betweenFromLevel;
         bonusDisplay = levelBonus; // Initialize bonus display to full amount
         bonusApplied = false;
 
@@ -1263,7 +809,7 @@ export function createGame(canvas) {
         }
 
         // Calculate dynamic duration based on level
-        const bonusTransferDuration = (betweenFromLevel * 0.5) + 0.5;
+        const bonusTransferDuration = (betweenFromLevel * 0.5) + 0.2;
 
         // When timer reaches calculated duration AND animation is complete, move to next stage
         const timerDone = betweenTimer >= bonusTransferDuration;
@@ -1278,12 +824,12 @@ export function createGame(canvas) {
         }
       }
       // Stage 3: Pause after animation
-      else if (betweenStage === 3 && betweenTimer >= 0.5) {
+      else if (betweenStage === 3 && betweenTimer >= 0.3) {
         betweenStage = 4;
         betweenTimer = 0.0;
       }
       // Stage 4: Pause before fade
-      else if (betweenStage === 4 && betweenTimer >= 0.6) {
+      else if (betweenStage === 4 && betweenTimer >= 0.3) {
         betweenStage = 5;
         betweenTimer = 0.0;
       }
@@ -1338,27 +884,63 @@ export function createGame(canvas) {
     }
 
     // Normal playing
-    spawnTimer += dt;
-    if (spawnTimer >= SPAWN_INTERVAL) {
-      spawnTimer = 0;
-      spawnBody();
+    // Skip spawning for maze levels
+    const levelCfg = levels[levelIndex] || levels[0];
+    if (levelCfg.type !== 'maze') {
+      spawnTimer += dt;
+      if (spawnTimer >= SPAWN_INTERVAL) {
+        spawnTimer = 0;
+        spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H);
+      }
+
+      // Independent health spawns (using global default for now)
+      healthSpawnTimer += dt;
+      if (healthSpawnTimer >= DEFAULT_HEALTH_FREQUENCY) {
+        healthSpawnTimer = 0;
+        spawnHealthPickup(bodies, W, H);
+      }
+    } else {
+      // Update maze timer for maze levels (clamp at 0)
+      mazeTimer = Math.max(0, mazeTimer - dt);
     }
 
-    // Independent health spawns (using global default for now)
-    healthSpawnTimer += dt;
-    if (healthSpawnTimer >= DEFAULT_HEALTH_FREQUENCY) {
-      healthSpawnTimer = 0;
-      spawnHealthPickup();
-    }
+    applyAttraction(ship, bodies, dt, levelIndex, getMazeData);
+    const integrateResult = integrate(ship, bodies, levelIndex, energy, triggerExplosion, W, H, clamp, dt);
+    energy = integrateResult.energy;
+    hitFlashColor = integrateResult.hitFlashColor;
+    hitFlashTimer = Math.max(hitFlashTimer, integrateResult.hitFlashTimer);
+    if (integrateResult.shouldExplode) triggerExplosion();
 
-    applyAttraction(dt);
-    integrate(dt);
-    handleBodyMerges();
-    handleHealthHazardCollisions();
+    handleBodyMerges(bodies, applyLevelBoost);
+    handleHealthHazardCollisions(bodies);
     invulnTimer = Math.max(0, invulnTimer - dt);
     hitFlashTimer = Math.max(0, hitFlashTimer - dt);
     healFlashTimer = Math.max(0, healFlashTimer - dt);
-    handleCollisions();
+
+    const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+    warpScore = collResult.warpScore;
+    score = collResult.score;
+    energy = collResult.energy;
+    healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
+    hitFlashColor = collResult.hitFlashColor;
+    hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
+    if (collResult.shouldExplode) triggerExplosion();
+
+    // Check maze collision (only in maze levels)
+    const currentLevel = levels[levelIndex] || levels[0];
+    if (currentLevel.type === 'maze' && ship.alive && invulnTimer <= 0) {
+      if (checkMazeCollision(ship, W, H)) {
+        // Apply same damage as hitting a red hazard
+        energy -= ENEMY_DAMAGE;
+        hitFlashColor = 'rgba(255,60,60,';
+        hitFlashTimer = 0.1;
+
+        if (energy <= 0) {
+          energy = 0;
+          triggerExplosion();
+        }
+      }
+    }
 
     if (!wormholeActive && warpScore >= scoreGoal) spawnWormhole();
     updateWormhole(dt);
@@ -1407,11 +989,22 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
+    // Hide game elements on start screen and countdown for clean title page
+    const hideGameElements = phase === 'start' || phase === 'startCountdown';
+
     // Wormhole ripple (behind bodies, over background)
-    renderWormhole(ctx);
+    if (!hideGameElements) {
+      renderWormhole(ctx);
+    }
+
+    // Maze walls (render behind bodies)
+    if (!hideGameElements) {
+      renderMaze(ctx, W, H, phase);
+    }
 
     // Bodies
-    for (const b of bodies) {
+    if (!hideGameElements) {
+      for (const b of bodies) {
       // Calculate spawn animation scale (1px to full size over spawnDuration)
       let renderRadius = b.radius;
       if (b.spawnTime !== undefined && b.spawnTime < b.spawnDuration) {
@@ -1448,11 +1041,14 @@ export function createGame(canvas) {
         ctx.fill();
       }
     }
+    }
 
-    renderFragments(ctx);
+    if (!hideGameElements) {
+      renderFragments(ctx);
+    }
 
     // Ship (hidden during between-level overlay so it doesn't pop back full-size)
-    if (phase !== 'betweenLevels' && (ship.alive || phase === 'captured')) {
+    if (!hideGameElements && phase !== 'betweenLevels' && (ship.alive || phase === 'captured')) {
       ctx.save();
       ctx.translate(ship.x, ship.y);
       const capScale = (phase === 'captured') ? Math.max(0.1, captureTimer / 2.5) : 1;
@@ -1566,6 +1162,52 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
+    // Maze timer (bottom-right corner) - only for maze levels during gameplay
+    const currentLevelCfg = levels[levelIndex] || levels[0];
+    if (currentLevelCfg.type === 'maze' && phase === 'playing') {
+      const timerText = mazeTimer.toFixed(1) + 's';
+      ctx.save();
+
+      // Color transitions based on time remaining
+      let timerColor = '#00ccff'; // Default cyan (match maze wall color)
+      if (mazeTimer <= 5) {
+        timerColor = '#ff6b35'; // Orangey-red (last 5 seconds)
+      } else if (mazeTimer <= 10) {
+        timerColor = '#ff9500'; // Orange (last 10 seconds)
+      } else if (mazeTimer <= 15) {
+        timerColor = '#ffd700'; // Yellow (last 15 seconds)
+      }
+
+      // Shrink and fade when timer hits zero (shrink in place)
+      if (mazeTimer <= 0) {
+        // Shrink over 0.5s after hitting zero
+        const shrinkDuration = 0.5;
+        const timeSinceZero = 0; // Always 0 since we clamp at 0
+        const shrinkProgress = Math.min(1, timeSinceZero / shrinkDuration);
+        const scale = 1 - shrinkProgress; // 1.0 -> 0.0
+        const alpha = 1 - shrinkProgress; // 1.0 -> 0.0
+
+        if (scale > 0.01) { // Only render if still visible
+          // Shrink in place by translating to position, scaling, then drawing at origin
+          ctx.translate(w - 12, h - 12);
+          ctx.scale(scale, scale);
+          ctx.fillStyle = `rgba(255, 107, 53, ${alpha})`; // Fade out orangey-red
+          ctx.font = 'bold 20px monospace';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(timerText, 0, 0);
+        }
+      } else {
+        ctx.fillStyle = timerColor;
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(timerText, w - 12, h - 12);
+      }
+
+      ctx.restore();
+    }
+
     // Hit flash when taking damage (red for hazard, green for elite)
     if (hitFlashTimer > 0) {
       // Wall bumps (0.05s) get reduced opacity; enemy hits (0.1s) get full
@@ -1666,17 +1308,30 @@ export function createGame(canvas) {
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
 
+      const isMazeLevel = (levels[levelIndex] || levels[0]).type === 'maze';
+      const countdownTotal = 3.0;
+      const shrinkDuration = 0.35;
+
       if (startCountdownStage === 0) {
-        const total = 3.0;
-        const t = clamp(startCountdownTimer, 0, total);
-        const remaining = Math.max(1, Math.ceil(total - t)); // 3..2..1
-        const text = String(remaining);
+        const t = Math.min(startCountdownTimer, countdownTotal);
+        const remainingRaw = countdownTotal - startCountdownTimer;
+        const shrinkElapsed = Math.max(0, startCountdownTimer - countdownTotal);
+        const shrinkProgress = isMazeLevel ? clamp(shrinkElapsed / shrinkDuration, 0, 1) : 0;
+        const countdownNumber = (isMazeLevel && shrinkProgress > 0)
+          ? '0'
+          : String(Math.max(1, Math.ceil(Math.max(0, remainingRaw))));
+
         const pulse = 1.0 + 0.25 * (1 - (t % 1.0));
+        const shrinkScale = 1 - shrinkProgress;
+        const scale = pulse * shrinkScale;
+        const alpha = 1 - shrinkProgress;
+
         ctx.save();
         ctx.translate(w * 0.5, h * 0.5);
-        ctx.scale(pulse, pulse);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
         ctx.font = 'bold 64px system-ui, -apple-system, Segoe UI, Roboto, Arial';
-        ctx.fillText(text, 0, 20);
+        ctx.fillText(countdownNumber, 0, 20);
         ctx.restore();
       } else if (startCountdownStage === 1) {
         ctx.font = 'bold 24px system-ui, -apple-system, Segoe UI, Roboto, Arial';
@@ -1834,14 +1489,17 @@ export function createGame(canvas) {
         const inputX = (w - inputW) / 2;
         const inputY = panelY + 112 * scale;
 
+        // Apply wobble offset if validation triggered
+        const wobbleOffset = Math.sin(nameEntryWobble * 2) * nameEntryWobble;
+
         // Input background
         ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.fillRect(inputX, inputY, inputW, inputH);
+        ctx.fillRect(inputX + wobbleOffset, inputY, inputW, inputH);
 
         // Input border
         ctx.strokeStyle = '#66d9ff';
         ctx.lineWidth = 2;
-        ctx.strokeRect(inputX, inputY, inputW, inputH);
+        ctx.strokeRect(inputX + wobbleOffset, inputY, inputW, inputH);
 
         // Name text with blinking cursor
         ctx.fillStyle = '#fff';
@@ -1858,20 +1516,28 @@ export function createGame(canvas) {
         // Text baseline Y position
         const textBaselineY = inputY + inputH * 0.65;
 
-        // Display name
-        ctx.fillText(displayName, w * 0.5, textBaselineY);
+        // Display name (with wobble)
+        ctx.fillText(displayName, w * 0.5 + wobbleOffset, textBaselineY);
 
         // Blinking cursor (blinks every 0.5s)
         const cursorVisible = (Date.now() % 1000) < 500;
         if (cursorVisible) {
           // Measure text width to position cursor
           const textWidth = ctx.measureText(displayName).width;
-          const cursorX = w * 0.5 + textWidth / 2 + 4;
+          const cursorX = w * 0.5 + textWidth / 2 + 4 + wobbleOffset;
           // Cursor should end at baseline, start above it by font size
           const cursorY = textBaselineY - fontSize;
           const cursorHeight = fontSize;
           ctx.fillStyle = '#66d9ff';
           ctx.fillRect(cursorX, cursorY, 2, cursorHeight);
+        }
+
+        // Validation message when character limit reached
+        if (nameEntryWobble > 0) {
+          ctx.fillStyle = '#ff6666';
+          ctx.font = `${Math.floor(12 * scale)}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+          ctx.textAlign = 'center';
+          ctx.fillText(`max ${MAX_NAME_LENGTH} chars`, w * 0.5, inputY + inputH + 18 * scale);
         }
 
         // Buttons (Skip on left, Submit on right per UX standards)
@@ -1937,27 +1603,27 @@ export function createGame(canvas) {
         boardY += 26;
 
         if (!highScores || highScores.length === 0) {
-          ctx.font = '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+          ctx.font = '14px monospace';
           ctx.fillText('No scores yet...', w * 0.5, boardY + 4);
         } else {
           const maxRows = 10;
           for (let i = 0; i < Math.min(highScores.length, maxRows); i++) {
             const row = highScores[i];
-            const name = row.name ?? 'Anon';
+            const name = (row.name ?? 'Anon').slice(0, MAX_NAME_LENGTH); // Cap at 15 chars
             const s = row.score ?? 0;
-            const line = `${i + 1}. ${name} - ${s}`;
+            const position = getOrdinal(i + 1); // 1st, 2nd, 3rd, etc.
 
             // Highlight newly submitted entry with bold font
-            const isNewEntry = lastSubmittedName && name === lastSubmittedName;
+            const isNewEntry = lastSubmittedName && (row.name ?? 'Anon') === lastSubmittedName;
 
             // Draw sparkles around new entry
             if (isNewEntry) {
               const lineY = boardY + i * 20;
               const time = Date.now() / 1000;
 
-              // Create 4 sparkles in 3D elliptical orbit
-              for (let j = 0; j < 4; j++) {
-                const angle = (time * 0.5 + j * Math.PI / 2) % TWO_PI;
+              // Create 5 sparkles in 3D elliptical orbit
+              for (let j = 0; j < 5; j++) {
+                const angle = (time * 0.5 + j * TWO_PI / 5) % TWO_PI;
 
                 // Horizontal position (left-right orbit)
                 const sparkleX = w * 0.5 + Math.cos(angle) * 120;
@@ -1974,11 +1640,12 @@ export function createGame(canvas) {
                 const baseSize = 2 + twinkle * 1.5;
                 const size = baseSize * depthFactor;
 
-                // Opacity also affected by depth (further = more transparent)
-                const depthOpacity = 0.4 + depthFactor * 0.3; // ranges from 0.4 to 0.7
+                // Opacity: vary between 0.2 and 1.0 (20% to 100%)
+                const baseOpacity = 0.2 + depthFactor * 0.5; // ranges from 0.2 to 0.7
+                const finalOpacity = baseOpacity + twinkle * 0.3; // adds up to 0.3 more
 
                 ctx.save();
-                ctx.fillStyle = `rgba(255, 215, 0, ${depthOpacity * twinkle})`;
+                ctx.fillStyle = `rgba(255, 215, 0, ${finalOpacity})`;
                 ctx.beginPath();
                 ctx.arc(sparkleX, sparkleY, size, 0, TWO_PI);
                 ctx.fill();
@@ -1986,11 +1653,28 @@ export function createGame(canvas) {
               }
             }
 
+            // Use monospace font for proper alignment
             ctx.font = isNewEntry
-              ? 'bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial'
-              : '14px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+              ? 'bold 14px monospace'
+              : '14px monospace';
+            ctx.textAlign = 'left';
 
-            ctx.fillText(line, w * 0.5, boardY + i * 20);
+            // Build formatted line with right-justified score
+            // Format: "1st  Name               123"
+            const lineY = boardY + i * 20;
+
+            // Position component - left-aligned from a starting point
+            const startX = w * 0.5 - 120; // Start 150px left of center
+            ctx.fillText(position, startX, lineY);
+
+            // Name - positioned after position
+            const nameX = startX + 40; // Space for position (e.g., "10th ")
+            ctx.fillText(name, nameX, lineY);
+
+            // Score - right-aligned (no leading zeros)
+            ctx.textAlign = 'right';
+            const scoreX = w * 0.5 + 120; // End 150px right of center
+            ctx.fillText(String(s), scoreX, lineY);
           }
         }
       }
@@ -2001,13 +1685,14 @@ export function createGame(canvas) {
         restartBtn.h = 48;
         restartBtn.x = w * 0.5 - restartBtn.w / 2;
         restartBtn.y = h * 0.8;
-        ctx.fillStyle = '#1f8efa';
+        ctx.fillStyle = '#16c784'; // Match start button color
         ctx.fillRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
-        ctx.strokeStyle = '#cfe8ff';
+        ctx.strokeStyle = '#c8ffe6'; // Match start button border
         ctx.lineWidth = 2;
         ctx.strokeRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 18px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+        ctx.textAlign = 'center'; // Reset to center (was 'right' from leaderboard)
         ctx.fillText('Restart', w * 0.5, restartBtn.y + restartBtn.h / 2 + 6);
       }
 
@@ -2016,9 +1701,46 @@ export function createGame(canvas) {
   }
 
   // --- Resize ---
-  function onResize() {
-    ship.x = clamp(ship.x, 0, W());
-    ship.y = clamp(ship.y, 0, H());
+  function onResize(newW, newH) {
+    const w = Number.isFinite(newW) ? newW : W();
+    const h = Number.isFinite(newH) ? newH : H();
+    if (!w || !h) return;
+
+    const scaleX = lastW ? w / lastW : 1;
+    const scaleY = lastH ? h / lastH : 1;
+
+    if (scaleX !== 1 || scaleY !== 1) {
+      ship.x *= scaleX;
+      ship.y *= scaleY;
+
+      for (const b of bodies) {
+        b.x *= scaleX;
+        b.y *= scaleY;
+      }
+
+      for (const f of fragments) {
+        f.x *= scaleX;
+        f.y *= scaleY;
+      }
+
+      if (wormhole) {
+        wormhole.x *= scaleX;
+        wormhole.y *= scaleY;
+      }
+
+      // Keep maze grid math in sync with the current viewport
+      const mazeInfo = getMazeData();
+      if (mazeInfo) {
+        mazeInfo.width = w;
+        mazeInfo.height = h;
+      }
+    }
+
+    lastW = w;
+    lastH = h;
+
+    ship.x = clamp(ship.x, 0, w);
+    ship.y = clamp(ship.y, 0, h);
   }
 
   // Sync hidden input with playerName for mobile keyboard
