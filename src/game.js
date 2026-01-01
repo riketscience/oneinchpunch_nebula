@@ -998,7 +998,8 @@ export function createGame(canvas) {
       const dx = ship.x - patch.x;
       const dy = ship.y - patch.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= patch.currentRadius) {
+      // Use slightly larger radius for collision to account for irregular edge (max variation is 1.15x)
+      if (dist <= patch.currentRadius * 1.1) {
         if (!wasShipFrozen) {
           // Just entered ice - freeze current velocity with minimum speed
           const currentSpeed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
@@ -1123,8 +1124,30 @@ export function createGame(canvas) {
           alpha *= (timeRemaining / fadeStart);
         }
 
+        // Draw ice patch with randomized edge
         ctx.beginPath();
-        ctx.arc(patch.x, patch.y, patch.currentRadius, 0, TWO_PI);
+        if (patch.edgeVariation && patch.edgeVariation.length > 0) {
+          // Draw irregular edge using the randomized pattern
+          const pointCount = patch.edgeVariation.length;
+          for (let i = 0; i <= pointCount; i++) {
+            const angle = (i / pointCount) * TWO_PI;
+            const variation = patch.edgeVariation[i % pointCount];
+            const r = patch.currentRadius * variation;
+            const px = patch.x + Math.cos(angle) * r;
+            const py = patch.y + Math.sin(angle) * r;
+
+            if (i === 0) {
+              ctx.moveTo(px, py);
+            } else {
+              ctx.lineTo(px, py);
+            }
+          }
+          ctx.closePath();
+        } else {
+          // Fallback to circle if no edge variation
+          ctx.arc(patch.x, patch.y, patch.currentRadius, 0, TWO_PI);
+        }
+
         ctx.fillStyle = `rgba(135, 206, 235, ${alpha})`; // Light blue with transparency
         ctx.fill();
 

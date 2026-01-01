@@ -355,6 +355,14 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
 
     if (b.type === "ice_star") {
       // Ice star hit: trigger ice patch creation
+      // Generate randomized edge pattern (24 points around circle)
+      const edgePointCount = 24;
+      const edgeVariation = [];
+      for (let i = 0; i < edgePointCount; i++) {
+        // Random variation: -15% to +15% of radius
+        edgeVariation.push(0.85 + Math.random() * 0.3);
+      }
+
       newIcePatch = {
         x: b.x,
         y: b.y,
@@ -364,7 +372,8 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
         expansionTimer: 0,
         expansionDuration: 1.0, // 1 second expansion
         duration: 15.0, // 15 seconds total lifetime
-        timer: 0
+        timer: 0,
+        edgeVariation // Randomized edge pattern
       };
       // Mark the ice_star body for transformation (change its type to signal it's expanding)
       b.type = 'ice_patch_expanding';
