@@ -216,22 +216,22 @@ export function handleBodyMerges(bodies, applyLevelBoost) {
 }
 
 /**
- * Handle collisions between health pickups and hazards
+ * Handle collisions between health pickups and hazards (including ice stars)
  */
 export function handleHealthHazardCollisions(bodies) {
   for (let i = bodies.length - 1; i >= 0; i--) {
     const a = bodies[i];
-    if (a.type !== 'health' && a.type !== 'hazard' && a.type !== 'hazard_elite') continue;
+    if (a.type !== 'health' && a.type !== 'hazard' && a.type !== 'hazard_elite' && a.type !== 'ice_star' && a.type !== 'ice_patch_expanding') continue;
 
     for (let j = i - 1; j >= 0; j--) {
       const b = bodies[j];
-      if (b.type !== 'health' && b.type !== 'hazard' && b.type !== 'hazard_elite') continue;
+      if (b.type !== 'health' && b.type !== 'hazard' && b.type !== 'hazard_elite' && b.type !== 'ice_star' && b.type !== 'ice_patch_expanding') continue;
 
-      // One must be health, the other hazard / hazard_elite
+      // One must be health, the other hazard / hazard_elite / ice_star / ice_patch_expanding
       const isHealthA = a.type === 'health';
       const isHealthB = b.type === 'health';
-      const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite');
-      const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite');
+      const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite' || a.type === 'ice_star' || a.type === 'ice_patch_expanding');
+      const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite' || b.type === 'ice_star' || b.type === 'ice_patch_expanding');
 
       if (!((isHealthA && isHazardB) || (isHealthB && isHazardA))) {
         continue;
@@ -241,7 +241,7 @@ export function handleHealthHazardCollisions(bodies) {
       const dy = a.y - b.y;
       const minDist = a.radius + b.radius;
       if (dx * dx + dy * dy <= minDist * minDist) {
-        // Remove the health, keep the hazard
+        // Remove the health, keep the hazard/ice_star/ice_patch_expanding
         const healthIndex = isHealthA ? i : j;
         bodies.splice(healthIndex, 1);
         // Restart outer loop since array changed
@@ -327,7 +327,7 @@ export function circleHitsShip(ship, bx, by, br) {
 
 /**
  * Handle all ship vs body collisions
- * Returns collision results (score changes, energy changes, etc.)
+ * Returns collision results (score changes, energy changes, ice patch creation, etc.)
  */
 export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2) {
   let newWarpScore = warpScore;
@@ -337,6 +337,7 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
   let hitFlashColor = 'rgba(255,60,60,';
   let hitFlashTimer = 0;
   let shouldExplode = false;
+  let newIcePatch = null; // Will contain ice patch data if ice star is hit
 
   // Ship vs bodies
   for (let i = bodies.length - 1; i >= 0; i--) {
@@ -352,7 +353,28 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
 
     if (invulnTimer > 0 || !ship.alive || phase !== 'playing') continue;
 
-    if (b.type === "coin") {
+    if (b.type === "ice_star") {
+      // Ice star hit: trigger ice patch creation
+      newIcePatch = {
+        x: b.x,
+        y: b.y,
+        initialRadius: b.radius,
+        targetRadius: b.radius * 8, // Expand to 8x the initial size
+        currentRadius: b.radius,
+        expansionTimer: 0,
+        expansionDuration: 1.0, // 1 second expansion
+        duration: 15.0, // 15 seconds total lifetime
+        timer: 0
+      };
+      // Mark the ice_star body for transformation (change its type to signal it's expanding)
+      b.type = 'ice_patch_expanding';
+      b.icePatchData = newIcePatch;
+      // Stop the body from moving
+      b.vx = 0;
+      b.vy = 0;
+      b.gravMult = 0;
+      b.attractMul = 0;
+    } else if (b.type === "coin") {
       // Warp gain
       newWarpScore += 10;
 
@@ -381,6 +403,9 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
       healFlashTimer = HEAL_FLASH_TOTAL;
 
       bodies.splice(i, 1);
+    } else if (b.type === 'ice_patch_expanding') {
+      // Ice patch expanding - no collision effect (ship just enters the ice)
+      // The ice physics are handled in game.js update loop
     } else {
       // Enemy hit (hazard / hazard_elite)
       const isElite = b.type === 'hazard_elite';
@@ -441,6 +466,7 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
     healFlashTimer,
     hitFlashColor,
     hitFlashTimer,
-    shouldExplode
+    shouldExplode,
+    newIcePatch
   };
 }
