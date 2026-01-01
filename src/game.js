@@ -56,6 +56,11 @@ export function createGame(canvas) {
   let spawnTimer = 0;
   let healthSpawnTimer = 0;
 
+  // --- Ice patches (created by ice stars) ---
+  let icePatches = [];
+  let shipFrozen = false;
+  let frozenVelocity = { vx: 0, vy: 0 }; // Ship's velocity when it entered ice
+
   // --- Level state ---
   let levelIndex = 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
@@ -85,7 +90,7 @@ export function createGame(canvas) {
 
   // --- Energy, lives, respawn, hit feedback ---
   let energy = !test_vars.test_DEATH ? 1.0 : 0.3;
-  let lives = !test_vars.test_DEATH ? 2 : 0; // extra lives (3 total: current + 2 icons)
+  let lives = !test_vars.test_DEATH ? 2 : 1; // extra lives (3 total: current + 2 icons)
   let energyDisplay = energy; // smoothed energy for HUD
 
   // warpScore = points accumulated toward warp threshold this level
@@ -167,6 +172,8 @@ export function createGame(canvas) {
     wormholeActive = false;
     wormhole = null;
     bodies = [];
+    icePatches = []; // Clear ice patches
+    shipFrozen = false; // Unfreeze ship
     warpScore = 0;
     scoreDisplay = warpScore;
     mazeTimer = 60.0; // Reset maze timer
@@ -206,8 +213,6 @@ export function createGame(canvas) {
 
   function hardRestartGame() {
     levelIndex = 0;
-    lives = test_vars.test_DEATH ? 0 : 2;
-    energy = test_vars.test_DEATH ? 1.0 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -233,8 +238,6 @@ export function createGame(canvas) {
 
   function softRestartGame() {
     levelIndex = 0;
-    lives = test_vars.test_DEATH ? 0 : 2;
-    energy = test_vars.test_DEATH ? 0.3 : 1.0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -355,8 +358,10 @@ export function createGame(canvas) {
       gameOverTimer = 0.0;
       respawnPending = false;
 
-      // Clear all bodies from playfield so they don't show behind game over screen
+      // Clear all bodies and ice patches from playfield so they don't show behind game over screen
       bodies = [];
+      icePatches = [];
+      shipFrozen = false;
 
       // Don't submit score immediately - wait for death animation (2s)
       // submitScoreIfNeeded will be called after delay in update loop
@@ -393,7 +398,19 @@ export function createGame(canvas) {
   }
 
   function isCenterSafe() {
-    const cx = W() * 0.5, cy = H() * 0.5;
+    // For maze levels, check entry position; otherwise check center
+    const currentLevel = levels[levelIndex] || levels[0];
+    let cx, cy;
+
+    if (currentLevel.type === 'maze') {
+      const mazeData = getMazeData();
+      cx = mazeData.width * (mazeData.startX + mazeData.entryCol * mazeData.cellW + mazeData.cellW * 0.5);
+      cy = mazeData.height * (mazeData.startY + mazeData.entryRow * mazeData.cellH + mazeData.cellH * 0.5);
+    } else {
+      cx = W() * 0.5;
+      cy = H() * 0.5;
+    }
+
     const extraPad = 8;
     for (const b of bodies) {
       const minDist = SHIP_RADIUS + b.radius + extraPad;
@@ -409,8 +426,18 @@ export function createGame(canvas) {
     respawnCheckTimer -= dt;
     if (respawnCheckTimer <= 0) {
       if (isCenterSafe()) {
-        ship.x = W() * 0.5;
-        ship.y = H() * 0.5;
+        // For maze levels, respawn at entry position; otherwise respawn at center
+        const currentLevel = levels[levelIndex] || levels[0];
+
+        if (currentLevel.type === 'maze') {
+          const mazeData = getMazeData();
+          ship.x = mazeData.width * (mazeData.startX + mazeData.entryCol * mazeData.cellW + mazeData.cellW * 0.5);
+          ship.y = mazeData.height * (mazeData.startY + mazeData.entryRow * mazeData.cellH + mazeData.cellH * 0.5);
+        } else {
+          ship.x = W() * 0.5;
+          ship.y = H() * 0.5;
+        }
+
         ship.vx = 0;
         ship.vy = 0;
         ship.state = "rotating";
@@ -603,6 +630,7 @@ export function createGame(canvas) {
 
     if (phase !== 'playing') return;
     if (!ship.alive) return;
+    if (shipFrozen) return; // Cannot thrust while frozen in ice patch
 
     ship.state = "thrusting";
     ship.thrustDir = ship.angle;
@@ -926,6 +954,89 @@ export function createGame(canvas) {
     hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
     if (collResult.shouldExplode) triggerExplosion();
 
+    // Handle ice patch creation
+    if (collResult.newIcePatch) {
+      icePatches.push(collResult.newIcePatch);
+    }
+
+    // Update ice patches (expansion and lifetime)
+    for (let i = icePatches.length - 1; i >= 0; i--) {
+      const patch = icePatches[i];
+      patch.timer += dt;
+
+      // Handle expansion phase
+      if (patch.expansionTimer < patch.expansionDuration) {
+        patch.expansionTimer += dt;
+        const expansionProgress = Math.min(1, patch.expansionTimer / patch.expansionDuration);
+        patch.currentRadius = patch.initialRadius + (patch.targetRadius - patch.initialRadius) * expansionProgress;
+      }
+
+      // Remove expired patches
+      if (patch.timer >= patch.duration) {
+        icePatches.splice(i, 1);
+      }
+    }
+
+    // Update ice_patch_expanding bodies (expand their radius visually)
+    for (let i = bodies.length - 1; i >= 0; i--) {
+      const b = bodies[i];
+      if (b.type === 'ice_patch_expanding' && b.icePatchData) {
+        const patch = b.icePatchData;
+        if (patch.expansionTimer < patch.expansionDuration) {
+          b.radius = patch.currentRadius;
+        } else {
+          // Expansion complete - remove from bodies array
+          bodies.splice(i, 1);
+        }
+      }
+    }
+
+    // Check if ship is inside any ice patch
+    const wasShipFrozen = shipFrozen;
+    shipFrozen = false;
+    for (const patch of icePatches) {
+      const dx = ship.x - patch.x;
+      const dy = ship.y - patch.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Use slightly larger radius for collision to account for irregular edge (max variation is 1.15x)
+      if (dist <= patch.currentRadius * 1.1) {
+        if (!wasShipFrozen) {
+          // Just entered ice - freeze current velocity with minimum speed
+          const currentSpeed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+          const minSpeed = 50; // Minimum speed to prevent getting stuck
+
+          if (currentSpeed < minSpeed) {
+            // Apply minimum speed in the direction ship is facing
+            const angle = ship.state === "thrusting" ? ship.thrustDir : ship.angle;
+            frozenVelocity.vx = Math.cos(angle) * minSpeed;
+            frozenVelocity.vy = Math.sin(angle) * minSpeed;
+          } else {
+            // Use current velocity
+            frozenVelocity.vx = ship.vx;
+            frozenVelocity.vy = ship.vy;
+          }
+        }
+        shipFrozen = true;
+        break;
+      }
+    }
+
+    // Apply frozen physics to ship
+    if (shipFrozen) {
+      // Lock ship velocity to frozen velocity
+      ship.vx = frozenVelocity.vx;
+      ship.vy = frozenVelocity.vy;
+      // Prevent rotation
+      ship.angularVel = 0;
+      // Force ship to stay in rotating state (not thrusting)
+      if (ship.state === "thrusting") {
+        ship.state = "rotating";
+      }
+    } else if (wasShipFrozen && !shipFrozen) {
+      // Just exited ice - restore normal angular velocity
+      ship.angularVel = ANGULAR_VEL;
+    }
+
     // Check maze collision (only in maze levels)
     const currentLevel = levels[levelIndex] || levels[0];
     if (currentLevel.type === 'maze' && ship.alive && invulnTimer <= 0) {
@@ -1002,6 +1113,51 @@ export function createGame(canvas) {
       renderMaze(ctx, W, H, phase);
     }
 
+    // Ice patches (render behind bodies but on top of maze/background)
+    if (!hideGameElements) {
+      for (const patch of icePatches) {
+        // Calculate fade-out during last 2 seconds
+        const timeRemaining = patch.duration - patch.timer;
+        const fadeStart = 2.0;
+        let alpha = 0.4; // Base transparency
+        if (timeRemaining < fadeStart) {
+          alpha *= (timeRemaining / fadeStart);
+        }
+
+        // Draw ice patch with randomized edge
+        ctx.beginPath();
+        if (patch.edgeVariation && patch.edgeVariation.length > 0) {
+          // Draw irregular edge using the randomized pattern
+          const pointCount = patch.edgeVariation.length;
+          for (let i = 0; i <= pointCount; i++) {
+            const angle = (i / pointCount) * TWO_PI;
+            const variation = patch.edgeVariation[i % pointCount];
+            const r = patch.currentRadius * variation;
+            const px = patch.x + Math.cos(angle) * r;
+            const py = patch.y + Math.sin(angle) * r;
+
+            if (i === 0) {
+              ctx.moveTo(px, py);
+            } else {
+              ctx.lineTo(px, py);
+            }
+          }
+          ctx.closePath();
+        } else {
+          // Fallback to circle if no edge variation
+          ctx.arc(patch.x, patch.y, patch.currentRadius, 0, TWO_PI);
+        }
+
+        ctx.fillStyle = `rgba(135, 206, 235, ${alpha})`; // Light blue with transparency
+        ctx.fill();
+
+        // Add a subtle border
+        ctx.strokeStyle = `rgba(200, 230, 255, ${alpha * 1.5})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
     // Bodies
     if (!hideGameElements) {
       for (const b of bodies) {
@@ -1032,6 +1188,20 @@ export function createGame(canvas) {
         ctx.fillRect(-crossW / 2, -crossT / 2, crossW, crossT);
 
         ctx.restore();
+      } else if (b.type === 'ice_star' || b.type === 'ice_patch_expanding') {
+        // Light blue ice star
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, renderRadius, 0, TWO_PI);
+        ctx.fillStyle = '#87ceeb'; // Light blue
+        ctx.fill();
+
+        // Add white sparkle in center if not expanding yet
+        if (b.type === 'ice_star') {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, renderRadius * 0.3, 0, TWO_PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+        }
       } else {
         ctx.beginPath();
         ctx.arc(b.x, b.y, renderRadius, 0, TWO_PI);
@@ -1244,9 +1414,9 @@ export function createGame(canvas) {
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(0, 0, w, h);
 
-      const panelW = w * 0.8;
+      const panelW = w * 0.9;
       const panelH = h * 0.8;
-      const px = w * 0.1;
+      const px = w * 0.05;
       const py = h * 0.1;
 
       ctx.fillStyle = 'rgba(100, 255, 180, 0.2)';
@@ -1269,7 +1439,8 @@ export function createGame(canvas) {
         'Hold anywhere on the screen to thrust.',
         'Your ship accelerates in the direction',
         'that it is currently facing.',
-        'Collect stars to build up warp drive.',
+        '',
+        'Collect yellow stars to build up warp drive.',
         'Red & green pulsars drain your energy.',
         'Use gravity to slingshot them off-screen.',
         'This greatly increases your warp drive.',
@@ -1454,7 +1625,7 @@ export function createGame(canvas) {
         // Name entry panel - positioned at TOP to avoid Android keyboard push-up
         const scale = Math.min(1, w / 400, h / 350); // Scale based on viewport
         const panelW = Math.min(500, w * 0.9);
-        const panelH = Math.min(280 * scale, h * 0.5); // Max 50% of height
+        const panelH = Math.min(320 * scale, h * 0.6); // Increased height to fit buttons (was 280)
         const panelX = (w - panelW) / 2;
         const panelY = Math.min(h * 0.1, 40); // Position near top, min 40px from top
 

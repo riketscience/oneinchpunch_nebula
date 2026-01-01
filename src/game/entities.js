@@ -14,14 +14,19 @@ import {
 } from './config.js';
 
 /**
- * Spawn a coin or hazard body
+ * Spawn a coin or hazard body (or ice_star)
  */
 export function spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H) {
   if (bodies.length >= MAX_BODIES) return;
 
   const levelCfg = levels[levelIndex] || levels[0];
   const ratio = levelCfg.coinHazardSpawnRatio ?? 0.7;
-  const type = Math.random() < ratio ? "coin" : "hazard";
+  let type = Math.random() < ratio ? "coin" : "hazard";
+
+  // 25% chance to replace a hazard with an ice_star
+  if (type === "hazard" && Math.random() < 0.25) {
+    type = "ice_star";
+  }
 
   const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
   const radius = baseRadius * OBJECT_SCALE;

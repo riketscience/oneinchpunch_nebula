@@ -3,11 +3,11 @@
 // Environment-based configuration
 const isTestEnv = import.meta.env.VITE_ENV === 'test';
 
-export const game_title = isTestEnv ? 'Nebula (test)' : 'Nebula';
+export const game_title = isTestEnv ? 'Nebula (test1)' : 'Nebula';
 
 export const test_vars = isTestEnv ? {
   test_EOL: false,
-  test_DEATH: true,
+  test_DEATH: false,
 } : {
   test_EOL: false,
   test_DEATH: false,
@@ -82,12 +82,43 @@ export const levelStartQuotes = [
   'Never quit...',
   'Hold tight...',
   'Prepare for battle...',
+  'Noone said it would be easy...',
+  'You totally rock...'
 ];
 
 // --- Level Definitions ---
 export const levels = [
   // Level 1: Maze challenge (4x9 grid)
   // Level 2: Normal gameplay
+  {
+    type: 'maze',
+    scoreGoal: test_vars.test_EOL ? 10 : 100,
+    coinHazardSpawnRatio: 0,  // No spawning in maze levels
+    healthSpawnInterval: 999999,  // Disabled
+    typeBoost: {
+      coin: { grav: 1.0, speed: 1.0 },
+      hazard: { grav: 1.0, speed: 1.0 },
+      elite: { grav: 1.0, speed: 1.0 },
+    },
+    mazeConfig: {
+      // Grid layout: 4 columns x 9 rows (including empty rows for entry/exit)
+      // Binary encoding: top(8), right(4), bottom(2), left(1)
+      grid: [
+        [0b1001, 0b1001, 0b1100],
+        [0b0001, 0b0110, 0b0100],
+        [0b1001, 0b0010, 0b0110],
+        [0b0101, 0b0000, 0b0101],
+        [0b0101, 0b0000, 0b0100],
+        [0b0101, 0b0010, 0b0100],
+        [0b0011, 0b0010, 0b0110],
+      ],
+      entry: { col: 0, row: 0 },  // Top-left of empty row
+      exit: { col: 1, row: 3 },   // Bottom-left square (exit vortex position)
+      items: [
+        { col: 2, row: 3, type: 'health' },  // Health pack in maze
+      ],
+    },
+  },
   {
     scoreGoal: test_vars.test_EOL ? 25 : 200,
     coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
