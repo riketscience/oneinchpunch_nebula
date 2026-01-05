@@ -439,7 +439,7 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
     }
   }
 
-  // Remove offscreen bodies (hazards score when slung off-screen)
+  // Remove offscreen bodies (hazards and ice stars score when slung off-screen)
   const M = 8;
   const left = -M, top = -M;
   const right = W() + M, bottom = H() + M;
@@ -448,20 +448,24 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
     const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
     if (inside) {
       kept.push(b);
-    } else if (b.type === 'hazard' || b.type === 'hazard_elite') {
+    } else if (b.type === 'hazard' || b.type === 'hazard_elite' || b.type === 'ice_star') {
       // Only award points if score is not locked (not during wormhole capture)
       if (!scoreLocked) {
         // Green elite awards double points for slingshot
         if (b.type === 'hazard') {
           newWarpScore += 25;   // red
           newScore += 250;      // red
-        } else {
+        } else if (b.type === 'hazard_elite') {
           newWarpScore += 50;   // green elite (double)
           newScore += 500;      // green elite (double)
+        } else if (b.type === 'ice_star') {
+          // Ice star: half of red hazard, rounded to nearest 10
+          newWarpScore += 10;   // 12.5 rounded to 10
+          newScore += 130;      // 125 rounded to 130
         }
       }
     }
-    // coins/health going off-screen just vanish
+    // coins/health/ice_patch_expanding going off-screen just vanish
   }
 
   // Update bodies array with kept bodies
