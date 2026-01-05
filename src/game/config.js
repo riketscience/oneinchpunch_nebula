@@ -8,9 +8,11 @@ export const game_title = isTestEnv ? 'Nebula (test1)' : 'Nebula';
 export const test_vars = isTestEnv ? {
   test_EOL: false,
   test_DEATH: false,
+  START_LEVEL: 0,
 } : {
   test_EOL: false,
   test_DEATH: false,
+  START_LEVEL: 0,
 };
 
 // --- Math Constants ---
@@ -83,16 +85,35 @@ export const levelStartQuotes = [
   'Hold tight...',
   'Prepare for battle...',
   'Noone said it would be easy...',
+  'It\'s a doddle... right?!',
   'You totally rock...'
 ];
 
 // --- Level Definitions ---
 export const levels = [
-  // Level 1: Maze challenge (4x9 grid)
-  // Level 2: Normal gameplay
   {
+    scoreGoal: test_vars.test_EOL ? 25 : 180,
+    coinHazardSpawnRatio: 0.75,  // 75% coins, 25% hazards
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
+    typeBoost: {
+      coin: { grav: 1.0, speed: 1.0 },
+      hazard: { grav: 1.0, speed: 1.0 },
+      elite: { grav: 1.0, speed: 1.0 },
+    },
+  },
+  {
+    scoreGoal: 200,
+    coinHazardSpawnRatio: 0.7,
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
+    typeBoost: {
+      coin: { grav: 1.0, speed: 1.0 },
+      hazard: { grav: 1.0, speed: 1.0 },
+      elite: { grav: 1.0, speed: 1.0 },
+    },
+  },
+    {
     type: 'maze',
-    scoreGoal: test_vars.test_EOL ? 10 : 100,
+    // scoreGoal: test_vars.test_EOL ? 10 : 100,
     coinHazardSpawnRatio: 0,  // No spawning in maze levels
     healthSpawnInterval: 999999,  // Disabled
     typeBoost: {
@@ -120,16 +141,27 @@ export const levels = [
     },
   },
   {
-    scoreGoal: test_vars.test_EOL ? 25 : 200,
-    coinHazardSpawnRatio: 0.7,  // 70% coins, 30% hazards
+    scoreGoal: 250,
+    coinHazardSpawnRatio: 0.66,
     healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
     typeBoost: {
-      coin: { grav: 1.0, speed: 1.0 },
-      hazard: { grav: 1.0, speed: 1.0 },
-      elite: { grav: 1.0, speed: 1.0 },
+      coin: { grav: 1.1, speed: 1.1 },
+      hazard: { grav: 1.1, speed: 1.1 },
+      elite: { grav: 1.1, speed: 1.1 },
     },
   },
   {
+    scoreGoal: 300,
+    coinHazardSpawnRatio: 0.62,
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
+    iceStarChance: .2,
+    typeBoost: {
+      coin: { grav: 1.22, speed: 1.22 },
+      hazard: { grav: 1.22, speed: 1.22 },
+      elite: { grav: 1.22, speed: 1.22 },
+    },
+  },
+    {
     type: 'maze',
     scoreGoal: test_vars.test_EOL ? 10 : 100,
     coinHazardSpawnRatio: 0,  // No spawning in maze levels
@@ -158,30 +190,33 @@ export const levels = [
       ],
     },
   },
-  {
-    scoreGoal: 250,
-    coinHazardSpawnRatio: 0.66,
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 30,
-    typeBoost: {
-      coin: { grav: 1.1, speed: 1.1 },
-      hazard: { grav: 1.1, speed: 1.1 },
-      elite: { grav: 1.1, speed: 1.1 },
-    },
-  },
-  {
-    scoreGoal: 300,
-    coinHazardSpawnRatio: 0.62,
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
-    typeBoost: {
-      coin: { grav: 1.22, speed: 1.22 },
-      hazard: { grav: 1.22, speed: 1.22 },
-      elite: { grav: 1.22, speed: 1.22 },
-    },
-  },
   // Level 5: Second maze challenge (5x9 grid - larger maze)
+
   {
+    scoreGoal: 350,
+    coinHazardSpawnRatio: 0.58,
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
+    iceStarChance: 0.22,
+    typeBoost: {
+      coin: { grav: 1.34, speed: 1.34 },
+      hazard: { grav: 1.34, speed: 1.34 },
+      elite: { grav: 1.34, speed: 1.34 },
+    },
+  },
+  {
+    scoreGoal: 400,
+    coinHazardSpawnRatio: 0.54,
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
+    iceStarChance: 0.25,
+    typeBoost: {
+      coin: { grav: 1.45, speed: 1.45 },
+      hazard: { grav: 1.45, speed: 1.45 },
+      elite: { grav: 1.45, speed: 1.45 },
+    },
+  },
+    {
     type: 'maze',
-    scoreGoal: test_vars.test_EOL ? 15 : 150,
+    // scoreGoal: test_vars.test_EOL ? 15 : 150,
     coinHazardSpawnRatio: 0,
     healthSpawnInterval: 999999,
     typeBoost: {
@@ -201,10 +236,10 @@ export const levels = [
         [0b0101, 0b0011, 0b0000, 0b0110, 0b0101],
         [0b0001, 0b0100, 0b0001, 0b0010, 0b0110],
         [0b0011, 0b0110, 0b0011, 0b0010, 0b0100],
-        [0b0001, 0b0010, 0b0010, 0b0010, 0b0110],
+        [0b0011, 0b0010, 0b0010, 0b0010, 0b0110],
       ],
       entry: { col: 0, row: 0 },  // Top-left corner
-      exit: { col: 4, row: 8 },   // Bottom-right corner (diagonal traverse)
+      exit: { col: 0, row: 8 },
       items: [
         { col: 2, row: 2, type: 'health' },  // Health pack mid-upper area
         { col: 3, row: 5, type: 'health' },  // Health pack mid-lower area
@@ -212,29 +247,10 @@ export const levels = [
     },
   },
   {
-    scoreGoal: 350,
-    coinHazardSpawnRatio: 0.58,
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 35,
-    typeBoost: {
-      coin: { grav: 1.34, speed: 1.34 },
-      hazard: { grav: 1.34, speed: 1.34 },
-      elite: { grav: 1.34, speed: 1.34 },
-    },
-  },
-  {
-    scoreGoal: 400,
-    coinHazardSpawnRatio: 0.54,
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
-    typeBoost: {
-      coin: { grav: 1.45, speed: 1.45 },
-      hazard: { grav: 1.45, speed: 1.45 },
-      elite: { grav: 1.45, speed: 1.45 },
-    },
-  },
-  {
     scoreGoal: 450,
     coinHazardSpawnRatio: 0.5,
-    healthSpawnInterval: Math.floor(Math.random() * 30) + 40,
+    healthSpawnInterval: Math.floor(Math.random() * 30) + 50,
+    iceStarChance: 0.25,
     typeBoost: {
       coin: { grav: 1.5, speed: 1.5 },
       hazard: { grav: 1.5, speed: 1.5 },

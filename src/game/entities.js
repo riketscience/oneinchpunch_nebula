@@ -24,7 +24,7 @@ export function spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H) {
   let type = Math.random() < ratio ? "coin" : "hazard";
 
   // 25% chance to replace a hazard with an ice_star
-  if (type === "hazard" && Math.random() < 0.25) {
+  if (type === "hazard" && levelIndex >= 4 && Math.random() < (levelCfg.iceStarChance || 0.25)) {
     type = "ice_star";
   }
 

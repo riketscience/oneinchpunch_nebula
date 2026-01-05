@@ -62,7 +62,7 @@ export function createGame(canvas) {
   let frozenVelocity = { vx: 0, vy: 0 }; // Ship's velocity when it entered ice
 
   // --- Level state ---
-  let levelIndex = 0;
+  let levelIndex = test_vars.START_LEVEL || 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
 
   // --- Phase ---
@@ -212,7 +212,7 @@ export function createGame(canvas) {
   }
 
   function hardRestartGame() {
-    levelIndex = 0;
+    levelIndex = test_vars.START_LEVEL || 0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -237,7 +237,7 @@ export function createGame(canvas) {
   }
 
   function softRestartGame() {
-    levelIndex = 0;
+    levelIndex = test_vars.START_LEVEL || 0;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
