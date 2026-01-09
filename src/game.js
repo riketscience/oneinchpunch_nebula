@@ -12,6 +12,7 @@ import {
   HEAL_FLASH_TOTAL,
   levelStartQuotes,
   levels,
+  isLocalDev
 } from './game/config.js';
 import { initMaze, renderMaze, checkMazeCollision, getMazeData, spawnMazeItems, clearMaze, applyAttractorWallForce } from './game/maze.js';
 import {
@@ -26,13 +27,6 @@ import { spawnBody, spawnHealthPickup } from './game/entities.js';
 export function createGame(canvas) {
   const W = () => canvas.clientWidth;
   const H = () => canvas.clientHeight;
-
-  // Check if running locally (skip countdowns and quotes for faster dev iteration)
-  const isLocalDev = () => {
-    const hostname = window.location.hostname;
-    console.log(`Hostname: ${hostname}`);
-    return hostname === 'localhost' || hostname.startsWith('192.168.1') || hostname === '';
-  };
 
   let lastW = Math.max(1, W());
   let lastH = Math.max(1, H());
