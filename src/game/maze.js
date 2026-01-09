@@ -128,7 +128,47 @@ export function initMaze(mazeConfig, W, H) {
  * @param {Function} H - Canvas height getter
  * @param {string} phase - Current game phase
  */
-export function renderMaze(ctx, W, H, phase) {
+function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const wx = px - ax;
+  const wy = py - ay;
+  const len2 = vx * vx + vy * vy;
+  let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * vx;
+  const cy = ay + t * vy;
+  const dx = px - cx;
+  const dy = py - cy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function isWallAdjacentToCell(wall, cellCol, cellRow) {
+  // Top wall of cell (or bottom wall of cell above)
+  if ((wall.side === 'top' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'bottom' && wall.row === cellRow - 1 && wall.col === cellCol)) {
+    return true;
+  }
+  // Right wall of cell (or left wall of cell to the right)
+  if ((wall.side === 'right' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'left' && wall.row === cellRow && wall.col === cellCol + 1)) {
+    return true;
+  }
+  // Bottom wall of cell (or top wall of cell below)
+  if ((wall.side === 'bottom' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'top' && wall.row === cellRow + 1 && wall.col === cellCol)) {
+    return true;
+  }
+  // Left wall of cell (or right wall of cell to the left)
+  if ((wall.side === 'left' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'right' && wall.row === cellRow && wall.col === cellCol - 1)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function renderMaze(ctx, W, H, phase, ship = null) {
   if (mazeWalls.length === 0) return;
   // Only render maze during active gameplay (not on start screen)
   if (phase === 'start' || phase === 'startCountdown') return;
@@ -136,6 +176,22 @@ export function renderMaze(ctx, W, H, phase) {
   const w = W();
   const h = H();
   const time = performance.now() * 0.001;
+  const cellPxW = mazeData.cellW * w;
+  const cellPxH = mazeData.cellH * h;
+
+  let shipCell = null;
+  if (ship && cellPxW > 0 && cellPxH > 0) {
+    const shipNormX = ship.x / w;
+    const shipNormY = ship.y / h;
+    const shipCol = Math.floor((shipNormX - mazeData.startX) / mazeData.cellW);
+    const shipRow = Math.floor((shipNormY - mazeData.startY) / mazeData.cellH);
+    const grid = currentMazeConfig?.grid;
+    const cols = grid?.[0]?.length ?? 0;
+    const rows = grid?.length ?? 0;
+    if (shipCol >= 0 && shipCol < cols && shipRow >= 0 && shipRow < rows) {
+      shipCell = { col: shipCol, row: shipRow };
+    }
+  }
 
   ctx.save();
   ctx.lineWidth = 3;
@@ -158,6 +214,64 @@ export function renderMaze(ctx, W, H, phase) {
     ctx.moveTo(wall.x1 * w, wall.y1 * h);
     ctx.lineTo(wall.x2 * w, wall.y2 * h);
     ctx.stroke();
+
+    if (wall.isAttractor && shipCell && isWallAdjacentToCell(wall, shipCell.col, shipCell.row)) {
+      const x1 = wall.x1 * w;
+      const y1 = wall.y1 * h;
+      const x2 = wall.x2 * w;
+      const y2 = wall.y2 * h;
+      const midX = (x1 + x2) * 0.5;
+      const midY = (y1 + y2) * 0.5;
+      const wallLen = Math.hypot(x2 - x1, y2 - y1);
+      const arcRadius = Math.max(10, wallLen * 0.48);
+      const flatScale = 0.28;
+      const offset = Math.max(4, arcRadius * 0.18);
+      const isVertical = Math.abs(x2 - x1) < Math.abs(y2 - y1);
+      let cx = midX;
+      let cy = midY;
+      let startAngle = 0;
+      let endAngle = 0;
+      if (isVertical) {
+        const normalX = ship.x < x1 ? -1 : 1;
+        cx += normalX * offset;
+        startAngle = normalX > 0 ? -Math.PI / 2 : Math.PI / 2;
+        endAngle = normalX > 0 ? Math.PI / 2 : Math.PI * 1.5;
+      } else {
+        const normalY = ship.y < y1 ? -1 : 1;
+        cy += normalY * offset;
+        startAngle = normalY > 0 ? 0 : Math.PI;
+        endAngle = normalY > 0 ? Math.PI : Math.PI * 2;
+      }
+
+      const dist = pointToSegmentDistance(ship.x, ship.y, x1, y1, x2, y2);
+      const maxDist = Math.max(cellPxW, cellPxH) * 0.5 || 1;
+      const closeT = Math.max(0, Math.min(1, 1 - dist / maxDist));
+      const baseR = 190;
+      const baseG = 30;
+      const baseB = 255;
+      const hotR = 255;
+      const hotG = 60;
+      const hotB = 60;
+      const r = Math.round(baseR + (hotR - baseR) * closeT);
+      const g = Math.round(baseG + (hotG - baseG) * closeT);
+      const b = Math.round(baseB + (hotB - baseB) * closeT);
+      const pulse = 0.7 + 0.25 * Math.sin(Math.PI * time * 2);
+      const arcAlpha = (0.45 + 0.45 * closeT) * pulse;
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${arcAlpha})`;
+      ctx.lineWidth = 2.5;
+      ctx.translate(cx, cy);
+      if (isVertical) {
+        ctx.scale(flatScale, 1);
+      } else {
+        ctx.scale(1, flatScale);
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, arcRadius, startAngle, endAngle);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   ctx.restore();

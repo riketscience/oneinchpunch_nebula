@@ -345,6 +345,8 @@ export function createGame(canvas) {
     // Ensure energy and bar are visually zero when exploding
     energy = 0;
     energyDisplay = 0;
+    reverseSpinTimer = 0;
+    ship.angularVel = ANGULAR_VEL;
 
     ship.alive = false;
     fragments = [];
@@ -1172,7 +1174,7 @@ export function createGame(canvas) {
 
     // Maze walls (render behind bodies)
     if (!hideGameElements) {
-      renderMaze(ctx, W, H, phase);
+      renderMaze(ctx, W, H, phase, ship);
     }
 
     // Ice patches (render behind bodies but on top of maze/background)

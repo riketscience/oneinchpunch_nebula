@@ -39,7 +39,12 @@ export function spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H) {
     }
   }
 
-  const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;
+  let baseRadius = HAZARD_RADIUS;
+  if (type === "coin") {
+    baseRadius = COIN_RADIUS;
+  } else if (type === "hazard_elite") {
+    baseRadius = HAZARD_RADIUS * 0.75;
+  }
   const radius = baseRadius * OBJECT_SCALE;
 
   const futureT = 0.25;
