@@ -790,10 +790,11 @@ export function createGame(canvas) {
       }
       handleBodyMerges(bodies, applyLevelBoost);
       handleHealthHazardCollisions(bodies);
-      const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+      const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, lives, scoreLocked, W, H, clamp, dist2);
       warpScore = collResult.warpScore;
       score = collResult.score;
       energy = collResult.energy;
+      lives = collResult.lives;
       healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
       hitFlashColor = collResult.hitFlashColor;
       hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
@@ -985,10 +986,11 @@ export function createGame(canvas) {
     hitFlashTimer = Math.max(0, hitFlashTimer - dt);
     healFlashTimer = Math.max(0, healFlashTimer - dt);
 
-    const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+    const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, lives, scoreLocked, W, H, clamp, dist2);
     warpScore = collResult.warpScore;
     score = collResult.score;
     energy = collResult.energy;
+    lives = collResult.lives;
     healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
     hitFlashColor = collResult.hitFlashColor;
     hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
@@ -1244,6 +1246,22 @@ export function createGame(canvas) {
         ctx.fillRect(-crossT / 2, -crossW / 2, crossT, crossW);
         // horizontal bar
         ctx.fillRect(-crossW / 2, -crossT / 2, crossW, crossT);
+
+        ctx.restore();
+      } else if (b.type === 'extralife') {
+        // Small ship icon (same shape as lives display)
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.rotate(-Math.PI / 4);
+
+        ctx.beginPath();
+        ctx.moveTo(renderRadius, 0);
+        ctx.lineTo(-renderRadius * 0.7, renderRadius * 0.6);
+        ctx.lineTo(-renderRadius * 0.4, 0);
+        ctx.lineTo(-renderRadius * 0.7, -renderRadius * 0.6);
+        ctx.closePath();
+        ctx.fillStyle = '#cfe8ff';
+        ctx.fill();
 
         ctx.restore();
       } else if (b.type === 'ice_star' || b.type === 'ice_patch_expanding') {

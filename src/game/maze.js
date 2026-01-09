@@ -225,7 +225,7 @@ export function renderMaze(ctx, W, H, phase, ship = null) {
       const wallLen = Math.hypot(x2 - x1, y2 - y1);
       const arcRadius = Math.max(10, wallLen * 0.48);
       const flatScale = 0.28;
-      const offset = Math.max(4, arcRadius * 0.18);
+      const offset = Math.max(4, arcRadius * flatScale);
       const isVertical = Math.abs(x2 - x1) < Math.abs(y2 - y1);
       let cx = midX;
       let cy = midY;
@@ -390,15 +390,15 @@ export function spawnMazeItems(bodies, W, H) {
   const h = H();
 
   for (const item of currentMazeConfig.items) {
-    if (item.type === 'health') {
-      const radius = HEALTH_RADIUS * OBJECT_SCALE;
+    if (item.type === 'health' || item.type === 'extralife') {
+      const radius = item.type === 'extralife' ? 9 : HEALTH_RADIUS * OBJECT_SCALE;
 
       // Position at center of grid cell
       const x = w * (mazeData.startX + item.col * mazeData.cellW + mazeData.cellW * 0.5);
       const y = h * (mazeData.startY + item.row * mazeData.cellH + mazeData.cellH * 0.5);
 
       const body = {
-        type: 'health',
+        type: item.type,
         radius,
         x,
         y,
@@ -444,7 +444,7 @@ export function applyAttractorWallForce(ship, dt, W, H) {
   if (shipCol < 0 || shipCol >= cols || shipRow < 0 || shipRow >= rows) return;
 
   // Strong constant attraction force (much higher to be noticeable)
-  const attractorForce = 40;
+  const attractorForce = currentMazeConfig?.attractorForce ?? 40;
 
   for (const wall of mazeWalls) {
     if (!wall.isAttractor) continue;

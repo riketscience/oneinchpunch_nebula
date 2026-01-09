@@ -11,7 +11,7 @@ export const isLocalDev = () => {
 export const test_vars = isLocalDev() ? {
   test_EOL: false,
   test_DEATH: false,
-  START_LEVEL: 5,
+  START_LEVEL: 8,
 } : isTestEnv ? {
   test_EOL: false,
   test_DEATH: false,
@@ -152,7 +152,8 @@ export const levels = [
         { col: 0, row: 4, side: 'right' },  // Right wall of cell [0,4]
         { col: 1, row: 4, side: 'left' },   // Left wall of cell [1,4] (same physical wall)
       ],
-    },
+      attractorForce: 40,
+   },
   },
   {
     scoreGoal: 250,
@@ -186,6 +187,7 @@ export const levels = [
       elite: { grav: 1.0, speed: 1.0 },
     },
     mazeConfig: {
+
       // Grid layout: 4 columns x 9 rows (including empty rows for entry/exit)
       // Binary encoding: top(8), right(4), bottom(2), left(1)
       grid: [
@@ -206,6 +208,7 @@ export const levels = [
         { col: 1, row: 1, side: 'right' },  // Right wall of cell [0,4]
         { col: 2, row: 1, side: 'left' },   // Left wall of cell [1,4] (same physical wall)
       ],
+      attractorForce: 40,
     },
   },
   // Level 5: Second maze challenge (5x9 grid - larger maze)
@@ -260,9 +263,19 @@ export const levels = [
       exit: { col: 0, row: 8 },
       items: [
         { col: 2, row: 2, type: 'health' },  // Health pack mid-upper area
+        { col: 3, row: 2, type: 'extralife' },  // Extra life mid-upper area
         { col: 3, row: 5, type: 'health' },  // Health pack mid-lower area
       ],
+    attractorWalls: [
+        { col: 2, row: 2, side: 'right' },  // Right wall of cell [0,4]
+        { col: 3, row: 2, side: 'left' },   // Left wall of cell [1,4] (same physical wall)
+        { col: 3, row: 7, side: 'bottom' },  // Right wall of cell [0,4]
+        { col: 3, row: 8, side: 'top' },   // Left wall of cell [1,4] (same physical wall)
+        { col: 4, row: 4, side: 'right' },  // Right wall of cell [0,4]
+        { col: 4, row: 5, side: 'right' },  // Right wall of cell [0,4]
+      ]
     },
+    attractorForce: 28,
   },
   {
     scoreGoal: 450,
