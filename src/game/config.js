@@ -3,11 +3,12 @@
 // Environment-based configuration
 const isTestEnv = import.meta.env.VITE_ENV === 'test';
 
-export const game_title = isTestEnv ? 'Nebula (test1)' : 'Nebula';
+
 export const isLocalDev = () => {
     const hostname = window.location.hostname;
     return hostname === 'localhost' || hostname.startsWith('192.168.1') || hostname === '';
-  };
+};
+export const game_title = isLocalDev() ? 'Nebula (local)' : isTestEnv ? 'Nebula (test)' : 'Nebula';
 export const test_vars = isLocalDev() ? {
   test_EOL: false,
   test_DEATH: false,
