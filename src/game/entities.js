@@ -14,7 +14,7 @@ import {
 } from './config.js';
 
 /**
- * Spawn a coin or hazard body (or ice_star)
+ * Spawn a coin or hazard body (or ice_star, hazard_elite, hazard_reverse)
  */
 export function spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H) {
   if (bodies.length >= MAX_BODIES) return;
@@ -23,9 +23,20 @@ export function spawnBody(ship, bodies, levelIndex, applyLevelBoost, W, H) {
   const ratio = levelCfg.coinHazardSpawnRatio ?? 0.7;
   let type = Math.random() < ratio ? "coin" : "hazard";
 
-  // 25% chance to replace a hazard with an ice_star
-  if (type === "hazard" && levelIndex >= 4 && Math.random() < (levelCfg.iceStarChance || 0.25)) {
-    type = "ice_star";
+  // Process hazard variations
+  if (type === "hazard") {
+    // 25% chance to replace a hazard with an ice_star (from level 5)
+    if (levelIndex >= 4 && Math.random() < (levelCfg.iceStarChance || 0.25)) {
+      type = "ice_star";
+    }
+    // 1/8 chance to spawn green elite directly (from level 7)
+    else if (levelIndex >= 6 && Math.random() < 0.125) {
+      type = "hazard_elite";
+    }
+    // ~10% chance to spawn orange reverse-spin hazard
+    else if (Math.random() < 0.1) {
+      type = "hazard_reverse";
+    }
   }
 
   const baseRadius = type === "coin" ? COIN_RADIUS : HAZARD_RADIUS;

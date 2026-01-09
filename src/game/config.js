@@ -8,7 +8,7 @@ export const game_title = isTestEnv ? 'Nebula (test1)' : 'Nebula';
 export const test_vars = isTestEnv ? {
   test_EOL: false,
   test_DEATH: false,
-  START_LEVEL: 0,
+  START_LEVEL: 5,
 } : {
   test_EOL: false,
   test_DEATH: false,
@@ -138,6 +138,13 @@ export const levels = [
       items: [
         { col: 2, row: 3, type: 'health' },  // Health pack in maze
       ],
+      // Attractor walls: walls that attract the ship when adjacent
+      // side can be: 'top', 'right', 'bottom', 'left'
+      // Note: Define both sides of a wall for attraction from both adjacent cells
+      attractorWalls: [
+        { col: 0, row: 4, side: 'right' },  // Right wall of cell [0,4]
+        { col: 1, row: 4, side: 'left' },   // Left wall of cell [1,4] (same physical wall)
+      ],
     },
   },
   {
@@ -187,6 +194,10 @@ export const levels = [
       exit: { col: 1, row: 6 },   // Bottom-left square (exit vortex position)
       items: [
         { col: 3, row: 2, type: 'health' },  // Health pack in maze
+      ],
+      attractorWalls: [
+        { col: 1, row: 1, side: 'right' },  // Right wall of cell [0,4]
+        { col: 2, row: 1, side: 'left' },   // Left wall of cell [1,4] (same physical wall)
       ],
     },
   },
