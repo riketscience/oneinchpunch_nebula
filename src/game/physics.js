@@ -33,8 +33,8 @@ export function applyAttraction(ship, bodies, dt, levelIndex = 0, getMazeData = 
   for (let i = bodies.length - 1; i >= 0; i--) {
     const b = bodies[i];
 
-    // Special handling for health packs in maze levels
-    if (isMazeLevel && b.type === 'health' && getMazeData) {
+    // Special handling for health packs and extra lives in maze levels
+    if (isMazeLevel && (b.type === 'health' || b.type === 'extralife') && getMazeData) {
       const mazeData = getMazeData();
 
       // Calculate which grid cell the ship is in
@@ -216,22 +216,22 @@ export function handleBodyMerges(bodies, applyLevelBoost) {
 }
 
 /**
- * Handle collisions between health pickups and hazards (including ice stars)
+ * Handle collisions between health pickups and hazards (including ice stars and reverse hazards)
  */
 export function handleHealthHazardCollisions(bodies) {
   for (let i = bodies.length - 1; i >= 0; i--) {
     const a = bodies[i];
-    if (a.type !== 'health' && a.type !== 'hazard' && a.type !== 'hazard_elite' && a.type !== 'ice_star' && a.type !== 'ice_patch_expanding') continue;
+    if (a.type !== 'health' && a.type !== 'extralife' && a.type !== 'hazard' && a.type !== 'hazard_elite' && a.type !== 'hazard_reverse' && a.type !== 'ice_star' && a.type !== 'ice_patch_expanding') continue;
 
     for (let j = i - 1; j >= 0; j--) {
       const b = bodies[j];
-      if (b.type !== 'health' && b.type !== 'hazard' && b.type !== 'hazard_elite' && b.type !== 'ice_star' && b.type !== 'ice_patch_expanding') continue;
+      if (b.type !== 'health' && b.type !== 'extralife' && b.type !== 'hazard' && b.type !== 'hazard_elite' && b.type !== 'hazard_reverse' && b.type !== 'ice_star' && b.type !== 'ice_patch_expanding') continue;
 
-      // One must be health, the other hazard / hazard_elite / ice_star / ice_patch_expanding
-      const isHealthA = a.type === 'health';
-      const isHealthB = b.type === 'health';
-      const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite' || a.type === 'ice_star' || a.type === 'ice_patch_expanding');
-      const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite' || b.type === 'ice_star' || b.type === 'ice_patch_expanding');
+      // One must be health/extralife, the other hazard / hazard_elite / hazard_reverse / ice_star / ice_patch_expanding
+      const isHealthA = (a.type === 'health' || a.type === 'extralife');
+      const isHealthB = (b.type === 'health' || b.type === 'extralife');
+      const isHazardA = (a.type === 'hazard' || a.type === 'hazard_elite' || a.type === 'hazard_reverse' || a.type === 'ice_star' || a.type === 'ice_patch_expanding');
+      const isHazardB = (b.type === 'hazard' || b.type === 'hazard_elite' || a.type === 'hazard_reverse' || b.type === 'ice_star' || b.type === 'ice_patch_expanding');
 
       if (!((isHealthA && isHazardB) || (isHealthB && isHazardA))) {
         continue;
@@ -327,17 +327,19 @@ export function circleHitsShip(ship, bx, by, br) {
 
 /**
  * Handle all ship vs body collisions
- * Returns collision results (score changes, energy changes, ice patch creation, etc.)
+ * Returns collision results (score changes, energy changes, ice patch creation, reverse spin, etc.)
  */
-export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2) {
+export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, lives, scoreLocked, W, H, clamp, dist2) {
   let newWarpScore = warpScore;
   let newScore = score;
   let newEnergy = energy;
+  let newLives = lives;
   let healFlashTimer = 0;
   let hitFlashColor = 'rgba(255,60,60,';
   let hitFlashTimer = 0;
   let shouldExplode = false;
   let newIcePatch = null; // Will contain ice patch data if ice star is hit
+  let triggerReverseSpin = false; // Set to true if reverse hazard is hit
 
   // Ship vs bodies
   for (let i = bodies.length - 1; i >= 0; i--) {
@@ -412,19 +414,30 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
       healFlashTimer = HEAL_FLASH_TOTAL;
 
       bodies.splice(i, 1);
+    } else if (b.type === 'extralife') {
+      newLives += 1;
+      bodies.splice(i, 1);
     } else if (b.type === 'ice_patch_expanding') {
       // Ice patch expanding - no collision effect (ship just enters the ice)
       // The ice physics are handled in game.js update loop
     } else {
-      // Enemy hit (hazard / hazard_elite)
+      // Enemy hit (hazard / hazard_elite / hazard_reverse)
       const isElite = b.type === 'hazard_elite';
+      const isReverse = b.type === 'hazard_reverse';
       bodies.splice(i, 1);
 
-      // Green elite deals double damage
+      // Damage: green elite deals double, others deal normal
       newEnergy -= isElite ? (ENEMY_DAMAGE * 2) : ENEMY_DAMAGE;
 
       // Set flash color based on enemy type
-      hitFlashColor = isElite ? 'rgba(0,255,102,' : 'rgba(255,60,60,';
+      if (isElite) {
+        hitFlashColor = 'rgba(0,255,102,';
+      } else if (isReverse) {
+        hitFlashColor = 'rgba(255,140,60,'; // Orange flash
+        triggerReverseSpin = true; // Trigger reverse spin effect
+      } else {
+        hitFlashColor = 'rgba(255,60,60,'; // Red flash
+      }
       hitFlashTimer = 0.1;
 
       if (newEnergy <= 0 && ship.alive) {
@@ -448,13 +461,15 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
     const inside = (b.x >= left && b.x <= right && b.y >= top && b.y <= bottom);
     if (inside) {
       kept.push(b);
-    } else if (b.type === 'hazard' || b.type === 'hazard_elite' || b.type === 'ice_star') {
+    } else if (b.type === 'hazard' || b.type === 'hazard_elite' || b.type === 'hazard_reverse' || b.type === 'ice_star') {
       // Only award points if score is not locked (not during wormhole capture)
       if (!scoreLocked) {
-        // Green elite awards double points for slingshot
         if (b.type === 'hazard') {
           newWarpScore += 25;   // red
           newScore += 250;      // red
+        } else if (b.type === 'hazard_reverse') {
+          newWarpScore += 25;   // orange reverse (same as red)
+          newScore += 250;      // orange reverse (same as red)
         } else if (b.type === 'hazard_elite') {
           newWarpScore += 50;   // green elite (double)
           newScore += 500;      // green elite (double)
@@ -476,10 +491,12 @@ export function handleCollisions(ship, bodies, invulnTimer, phase, warpScore, sc
     warpScore: newWarpScore,
     score: newScore,
     energy: newEnergy,
+    lives: newLives,
     healFlashTimer,
     hitFlashColor,
     hitFlashTimer,
     shouldExplode,
-    newIcePatch
+    newIcePatch,
+    triggerReverseSpin
   };
 }

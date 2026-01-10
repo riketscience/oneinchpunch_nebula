@@ -57,6 +57,12 @@ export function initMaze(mazeConfig, W, H) {
     height: h        // Canvas height when maze was initialized
   };
 
+  // Helper function to check if a wall is an attractor
+  const isAttractorWall = (col, row, side) => {
+    const attractorWalls = mazeConfig.attractorWalls || [];
+    return attractorWalls.some(aw => aw.col === col && aw.row === row && aw.side === side);
+  };
+
   // Convert grid to wall segments
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
@@ -70,7 +76,9 @@ export function initMaze(mazeConfig, W, H) {
           x1: x,
           y1: y,
           x2: x + cellW,
-          y2: y
+          y2: y,
+          col, row, side: 'top',
+          isAttractor: isAttractorWall(col, row, 'top')
         });
       }
 
@@ -80,7 +88,9 @@ export function initMaze(mazeConfig, W, H) {
           x1: x + cellW,
           y1: y,
           x2: x + cellW,
-          y2: y + cellH
+          y2: y + cellH,
+          col, row, side: 'right',
+          isAttractor: isAttractorWall(col, row, 'right')
         });
       }
 
@@ -90,7 +100,9 @@ export function initMaze(mazeConfig, W, H) {
           x1: x,
           y1: y + cellH,
           x2: x + cellW,
-          y2: y + cellH
+          y2: y + cellH,
+          col, row, side: 'bottom',
+          isAttractor: isAttractorWall(col, row, 'bottom')
         });
       }
 
@@ -100,7 +112,9 @@ export function initMaze(mazeConfig, W, H) {
           x1: x,
           y1: y,
           x2: x,
-          y2: y + cellH
+          y2: y + cellH,
+          col, row, side: 'left',
+          isAttractor: isAttractorWall(col, row, 'left')
         });
       }
     }
@@ -114,7 +128,47 @@ export function initMaze(mazeConfig, W, H) {
  * @param {Function} H - Canvas height getter
  * @param {string} phase - Current game phase
  */
-export function renderMaze(ctx, W, H, phase) {
+function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const wx = px - ax;
+  const wy = py - ay;
+  const len2 = vx * vx + vy * vy;
+  let t = len2 > 0 ? (wx * vx + wy * vy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * vx;
+  const cy = ay + t * vy;
+  const dx = px - cx;
+  const dy = py - cy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function isWallAdjacentToCell(wall, cellCol, cellRow) {
+  // Top wall of cell (or bottom wall of cell above)
+  if ((wall.side === 'top' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'bottom' && wall.row === cellRow - 1 && wall.col === cellCol)) {
+    return true;
+  }
+  // Right wall of cell (or left wall of cell to the right)
+  if ((wall.side === 'right' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'left' && wall.row === cellRow && wall.col === cellCol + 1)) {
+    return true;
+  }
+  // Bottom wall of cell (or top wall of cell below)
+  if ((wall.side === 'bottom' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'top' && wall.row === cellRow + 1 && wall.col === cellCol)) {
+    return true;
+  }
+  // Left wall of cell (or right wall of cell to the left)
+  if ((wall.side === 'left' && wall.row === cellRow && wall.col === cellCol) ||
+      (wall.side === 'right' && wall.row === cellRow && wall.col === cellCol - 1)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function renderMaze(ctx, W, H, phase, ship = null) {
   if (mazeWalls.length === 0) return;
   // Only render maze during active gameplay (not on start screen)
   if (phase === 'start' || phase === 'startCountdown') return;
@@ -122,18 +176,102 @@ export function renderMaze(ctx, W, H, phase) {
   const w = W();
   const h = H();
   const time = performance.now() * 0.001;
-  const alpha = 0.7 + 0.2 * Math.sin(Math.PI * time); // 0.5 -> 0.9 over 2s
+  const cellPxW = mazeData.cellW * w;
+  const cellPxH = mazeData.cellH * h;
+
+  let shipCell = null;
+  if (ship && cellPxW > 0 && cellPxH > 0) {
+    const shipNormX = ship.x / w;
+    const shipNormY = ship.y / h;
+    const shipCol = Math.floor((shipNormX - mazeData.startX) / mazeData.cellW);
+    const shipRow = Math.floor((shipNormY - mazeData.startY) / mazeData.cellH);
+    const grid = currentMazeConfig?.grid;
+    const cols = grid?.[0]?.length ?? 0;
+    const rows = grid?.length ?? 0;
+    if (shipCol >= 0 && shipCol < cols && shipRow >= 0 && shipRow < rows) {
+      shipCell = { col: shipCol, row: shipRow };
+    }
+  }
 
   ctx.save();
-  ctx.strokeStyle = `rgba(0, 204, 255, ${alpha})`; // Bright blue with throb
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
 
   for (const wall of mazeWalls) {
+    if (wall.isAttractor) {
+      // Attractor walls: pulsating purple-tinted blue (lighter than normal walls)
+      const attractorAlpha = 0.7 + 0.25 * Math.sin(Math.PI * time * 2); // Faster pulsation
+      ctx.strokeStyle = `rgba(190, 30, 255, ${attractorAlpha})`; // Purple-tinted blue
+      ctx.lineWidth = 4; // Slightly thicker to make them more visible
+    } else {
+      // Normal walls: bright blue with throb
+      const alpha = 0.7 + 0.2 * Math.sin(Math.PI * time);
+      ctx.strokeStyle = `rgba(0, 204, 255, ${alpha})`;
+      ctx.lineWidth = 3;
+    }
+
     ctx.beginPath();
     ctx.moveTo(wall.x1 * w, wall.y1 * h);
     ctx.lineTo(wall.x2 * w, wall.y2 * h);
     ctx.stroke();
+
+    if (wall.isAttractor && shipCell && isWallAdjacentToCell(wall, shipCell.col, shipCell.row)) {
+      const x1 = wall.x1 * w;
+      const y1 = wall.y1 * h;
+      const x2 = wall.x2 * w;
+      const y2 = wall.y2 * h;
+      const midX = (x1 + x2) * 0.5;
+      const midY = (y1 + y2) * 0.5;
+      const wallLen = Math.hypot(x2 - x1, y2 - y1);
+      const arcRadius = Math.max(10, wallLen * 0.48);
+      const flatScale = 0.28;
+      const offset = Math.max(4, arcRadius * flatScale);
+      const isVertical = Math.abs(x2 - x1) < Math.abs(y2 - y1);
+      let cx = midX;
+      let cy = midY;
+      let startAngle = 0;
+      let endAngle = 0;
+      if (isVertical) {
+        const normalX = ship.x < x1 ? -1 : 1;
+        cx += normalX * offset;
+        startAngle = normalX > 0 ? -Math.PI / 2 : Math.PI / 2;
+        endAngle = normalX > 0 ? Math.PI / 2 : Math.PI * 1.5;
+      } else {
+        const normalY = ship.y < y1 ? -1 : 1;
+        cy += normalY * offset;
+        startAngle = normalY > 0 ? 0 : Math.PI;
+        endAngle = normalY > 0 ? Math.PI : Math.PI * 2;
+      }
+
+      const dist = pointToSegmentDistance(ship.x, ship.y, x1, y1, x2, y2);
+      const maxDist = Math.max(cellPxW, cellPxH) * 0.5 || 1;
+      const closeT = Math.max(0, Math.min(1, 1 - dist / maxDist));
+      const baseR = 190;
+      const baseG = 30;
+      const baseB = 255;
+      const hotR = 255;
+      const hotG = 60;
+      const hotB = 60;
+      const r = Math.round(baseR + (hotR - baseR) * closeT);
+      const g = Math.round(baseG + (hotG - baseG) * closeT);
+      const b = Math.round(baseB + (hotB - baseB) * closeT);
+      const pulse = 0.7 + 0.25 * Math.sin(Math.PI * time * 2);
+      const arcAlpha = (0.45 + 0.45 * closeT) * pulse;
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${arcAlpha})`;
+      ctx.lineWidth = 2.5;
+      ctx.translate(cx, cy);
+      if (isVertical) {
+        ctx.scale(flatScale, 1);
+      } else {
+        ctx.scale(1, flatScale);
+      }
+      ctx.beginPath();
+      ctx.arc(0, 0, arcRadius, startAngle, endAngle);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   ctx.restore();
@@ -252,15 +390,15 @@ export function spawnMazeItems(bodies, W, H) {
   const h = H();
 
   for (const item of currentMazeConfig.items) {
-    if (item.type === 'health') {
-      const radius = HEALTH_RADIUS * OBJECT_SCALE;
+    if (item.type === 'health' || item.type === 'extralife') {
+      const radius = item.type === 'extralife' ? 9 : HEALTH_RADIUS * OBJECT_SCALE;
 
       // Position at center of grid cell
       const x = w * (mazeData.startX + item.col * mazeData.cellW + mazeData.cellW * 0.5);
       const y = h * (mazeData.startY + item.row * mazeData.cellH + mazeData.cellH * 0.5);
 
       const body = {
-        type: 'health',
+        type: item.type,
         radius,
         x,
         y,
@@ -275,6 +413,103 @@ export function spawnMazeItems(bodies, W, H) {
 
       bodies.push(body);
       console.log(`Spawned health at grid[${item.col},${item.row}]: (${x.toFixed(1)}, ${y.toFixed(1)})`);
+    }
+  }
+}
+
+/**
+ * Apply mild attraction force from attractor walls when ship is in adjacent cell
+ * @param {Object} ship - Ship object with x, y, vx, vy
+ * @param {number} dt - Delta time
+ * @param {Function} W - Canvas width getter
+ * @param {Function} H - Canvas height getter
+ */
+export function applyAttractorWallForce(ship, dt, W, H) {
+  if (mazeWalls.length === 0 || !currentMazeConfig || !currentMazeConfig.grid) return;
+
+  const w = W();
+  const h = H();
+
+  // Calculate which grid cell the ship is in
+  const shipNormX = ship.x / w;
+  const shipNormY = ship.y / h;
+  const shipCol = Math.floor((shipNormX - mazeData.startX) / mazeData.cellW);
+  const shipRow = Math.floor((shipNormY - mazeData.startY) / mazeData.cellH);
+
+  const grid = currentMazeConfig.grid;
+  const cols = grid[0].length;
+  const rows = grid.length;
+
+  // Check if ship is in valid grid bounds
+  if (shipCol < 0 || shipCol >= cols || shipRow < 0 || shipRow >= rows) return;
+
+  // Strong constant attraction force (much higher to be noticeable)
+  const attractorForce = currentMazeConfig?.attractorForce ?? 40;
+
+  for (const wall of mazeWalls) {
+    if (!wall.isAttractor) continue;
+
+    // Check if wall is a boundary of the ship's current cell
+    // This includes walls owned by the current cell AND walls from adjacent cells
+    let isAdjacent = false;
+
+    // Top wall of ship's cell (or bottom wall of cell above)
+    if ((wall.side === 'top' && wall.row === shipRow && wall.col === shipCol) ||
+        (wall.side === 'bottom' && wall.row === shipRow - 1 && wall.col === shipCol)) {
+      isAdjacent = true;
+    }
+    // Right wall of ship's cell (or left wall of cell to the right)
+    else if ((wall.side === 'right' && wall.row === shipRow && wall.col === shipCol) ||
+             (wall.side === 'left' && wall.row === shipRow && wall.col === shipCol + 1)) {
+      isAdjacent = true;
+    }
+    // Bottom wall of ship's cell (or top wall of cell below)
+    else if ((wall.side === 'bottom' && wall.row === shipRow && wall.col === shipCol) ||
+             (wall.side === 'top' && wall.row === shipRow + 1 && wall.col === shipCol)) {
+      isAdjacent = true;
+    }
+    // Left wall of ship's cell (or right wall of cell to the left)
+    else if ((wall.side === 'left' && wall.row === shipRow && wall.col === shipCol) ||
+             (wall.side === 'right' && wall.row === shipRow && wall.col === shipCol - 1)) {
+      isAdjacent = true;
+    }
+
+    if (!isAdjacent) continue;
+
+    // Convert wall coordinates to pixels
+    const wallX1 = wall.x1 * w;
+    const wallY1 = wall.y1 * h;
+    const wallX2 = wall.x2 * w;
+    const wallY2 = wall.y2 * h;
+
+    // Calculate closest point on the wall segment to the ship
+    const wallDx = wallX2 - wallX1;
+    const wallDy = wallY2 - wallY1;
+    const wallLen2 = wallDx * wallDx + wallDy * wallDy;
+
+    if (wallLen2 === 0) continue; // Degenerate wall
+
+    // Project ship position onto wall line
+    const shipToWallStartX = ship.x - wallX1;
+    const shipToWallStartY = ship.y - wallY1;
+    let t = (shipToWallStartX * wallDx + shipToWallStartY * wallDy) / wallLen2;
+    t = Math.max(0, Math.min(1, t)); // Clamp to [0, 1]
+
+    // Closest point on wall
+    const closestX = wallX1 + t * wallDx;
+    const closestY = wallY1 + t * wallDy;
+
+    // Calculate perpendicular direction from ship to wall
+    const dx = closestX - ship.x;
+    const dy = closestY - ship.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 0.1) {
+      // Apply strong perpendicular attraction force toward the wall
+      const forceX = (dx / dist) * attractorForce * dt;
+      const forceY = (dy / dist) * attractorForce * dt;
+      ship.vx += forceX;
+      ship.vy += forceY;
     }
   }
 }

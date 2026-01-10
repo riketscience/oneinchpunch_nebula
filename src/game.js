@@ -12,8 +12,9 @@ import {
   HEAL_FLASH_TOTAL,
   levelStartQuotes,
   levels,
+  isLocalDev
 } from './game/config.js';
-import { initMaze, renderMaze, checkMazeCollision, getMazeData, spawnMazeItems, clearMaze } from './game/maze.js';
+import { initMaze, renderMaze, checkMazeCollision, getMazeData, spawnMazeItems, clearMaze, applyAttractorWallForce } from './game/maze.js';
 import {
   applyAttraction,
   integrate,
@@ -61,6 +62,9 @@ export function createGame(canvas) {
   let shipFrozen = false;
   let frozenVelocity = { vx: 0, vy: 0 }; // Ship's velocity when it entered ice
 
+  // --- Reverse spin effect (from orange hazard) ---
+  let reverseSpinTimer = 0; // Time remaining for reverse spin effect
+
   // --- Level state ---
   let levelIndex = test_vars.START_LEVEL || 0;
   let scoreGoal = levels[levelIndex].scoreGoal;
@@ -74,6 +78,7 @@ export function createGame(canvas) {
   // 'gameOver'     → out of lives, show Game Over screen
   let phase = 'start';
   let captureTimer = 0.0;
+  let captureStartWarpScore = 0; // Store warp score at start of capture for animation
   let betweenTimer = 0.0;
   let betweenStage = 0;
   let betweenFromLevel = 1;
@@ -213,6 +218,10 @@ export function createGame(canvas) {
 
   function hardRestartGame() {
     levelIndex = test_vars.START_LEVEL || 0;
+
+    // Reset energy and lives to initial values
+    energy = !test_vars.test_DEATH ? 1.0 : 0.3;
+    lives = !test_vars.test_DEATH ? 2 : 1;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -238,6 +247,10 @@ export function createGame(canvas) {
 
   function softRestartGame() {
     levelIndex = test_vars.START_LEVEL || 0;
+
+    // Reset energy and lives to initial values
+    energy = !test_vars.test_DEATH ? 1.0 : 0.3;
+    lives = !test_vars.test_DEATH ? 2 : 1;
     energyDisplay = energy;
 
     // New run: reset both global score and warp
@@ -255,11 +268,16 @@ export function createGame(canvas) {
 
     resetShipForLevel();
 
-    // Pick a random quote for game start
-    currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
-    phase = 'startCountdown';
-    startCountdownTimer = 0.0;
-    startCountdownStage = 0;
+    // Skip countdown and quote when running locally
+    if (isLocalDev()) {
+      phase = 'playing';
+    } else {
+      // Pick a random quote for game start
+      currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
+      phase = 'startCountdown';
+      startCountdownTimer = 0.0;
+      startCountdownStage = 0;
+    }
 
     gameOverTimer = 0;
 
@@ -329,6 +347,8 @@ export function createGame(canvas) {
     // Ensure energy and bar are visually zero when exploding
     energy = 0;
     energyDisplay = 0;
+    reverseSpinTimer = 0;
+    ship.angularVel = ANGULAR_VEL;
 
     ship.alive = false;
     fragments = [];
@@ -504,6 +524,7 @@ export function createGame(canvas) {
       if (d <= SHIP_RADIUS * 2 && phase === 'playing') {
         phase = 'captured';
         captureTimer = 2.5;
+        captureStartWarpScore = warpScore; // Store for animation
         ship.state = 'rotating';
         scoreLocked = true;
         scoreNumericDisplay = score;
@@ -518,6 +539,7 @@ export function createGame(canvas) {
       if (d <= wormhole.radius + SHIP_RADIUS * 0.8 && phase === 'playing') {
         phase = 'captured';
         captureTimer = 2.5;
+        captureStartWarpScore = warpScore; // Store for animation
         ship.state = 'rotating';
         scoreLocked = true;
         scoreNumericDisplay = score;
@@ -581,11 +603,16 @@ export function createGame(canvas) {
         const x = px, y = py;
         if (x >= startBtn.x && x <= startBtn.x + startBtn.w &&
             y >= startBtn.y && y <= startBtn.y + startBtn.h) {
-          // Pick a random quote for game start
-          currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
-          phase = 'startCountdown';
-          startCountdownTimer = 0.0;
-          startCountdownStage = 0;
+          // Skip countdown and quote when running locally
+          if (isLocalDev()) {
+            phase = 'playing';
+          } else {
+            // Pick a random quote for game start
+            currentLevelQuote = levelStartQuotes[Math.floor(Math.random() * levelStartQuotes.length)];
+            phase = 'startCountdown';
+            startCountdownTimer = 0.0;
+            startCountdownStage = 0;
+          }
           return;
         }
       }
@@ -759,6 +786,10 @@ export function createGame(canvas) {
       ship.angle += ship.angularVel * spinMult * dt;
       if (ship.angle > Math.PI) ship.angle -= TWO_PI;
 
+      // Animate warp score down to 0 in sync with ship shrinking
+      warpScore = captureStartWarpScore * (captureTimer / totalCapture);
+      scoreDisplay = warpScore; // Keep HUD warp bar synced during capture
+
       // Keep existing bodies moving & interacting while captured
       applyAttraction(ship, bodies, dt, levelIndex, getMazeData);
       for (const b of bodies) {
@@ -767,10 +798,11 @@ export function createGame(canvas) {
       }
       handleBodyMerges(bodies, applyLevelBoost);
       handleHealthHazardCollisions(bodies);
-      const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+      const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, lives, scoreLocked, W, H, clamp, dist2);
       warpScore = collResult.warpScore;
       score = collResult.score;
       energy = collResult.energy;
+      lives = collResult.lives;
       healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
       hitFlashColor = collResult.hitFlashColor;
       hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
@@ -863,8 +895,14 @@ export function createGame(canvas) {
       }
       // Stage 5: Fade out and shrink (fixed duration)
       else if (betweenStage === 5 && betweenTimer >= 0.3) {
-        betweenStage = 6;
-        betweenTimer = 0.0;
+        // Skip countdown and quote stages when running locally
+        if (isLocalDev()) {
+          startNextLevel();
+          return;
+        } else {
+          betweenStage = 6;
+          betweenTimer = 0.0;
+        }
       }
       // Stage 6: Countdown 3..2..1
       else if (betweenStage === 6 && betweenTimer >= 3.0) {
@@ -932,6 +970,17 @@ export function createGame(canvas) {
       mazeTimer = Math.max(0, mazeTimer - dt);
     }
 
+    // Handle reverse spin effect (from orange hazard)
+    if (reverseSpinTimer > 0) {
+      reverseSpinTimer -= dt;
+      // Force reversed angular velocity
+      ship.angularVel = -ANGULAR_VEL;
+    } else if (reverseSpinTimer <= 0 && ship.angularVel < 0) {
+      // Restore normal angular velocity when timer expires
+      ship.angularVel = ANGULAR_VEL;
+      reverseSpinTimer = 0; // Ensure it stays at 0
+    }
+
     applyAttraction(ship, bodies, dt, levelIndex, getMazeData);
     const integrateResult = integrate(ship, bodies, levelIndex, energy, triggerExplosion, W, H, clamp, dt);
     energy = integrateResult.energy;
@@ -945,10 +994,11 @@ export function createGame(canvas) {
     hitFlashTimer = Math.max(0, hitFlashTimer - dt);
     healFlashTimer = Math.max(0, healFlashTimer - dt);
 
-    const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, scoreLocked, W, H, clamp, dist2);
+    const collResult = physicsHandleCollisions(ship, bodies, invulnTimer, phase, warpScore, score, energy, lives, scoreLocked, W, H, clamp, dist2);
     warpScore = collResult.warpScore;
     score = collResult.score;
     energy = collResult.energy;
+    lives = collResult.lives;
     healFlashTimer = Math.max(healFlashTimer, collResult.healFlashTimer);
     hitFlashColor = collResult.hitFlashColor;
     hitFlashTimer = Math.max(hitFlashTimer, collResult.hitFlashTimer);
@@ -957,6 +1007,18 @@ export function createGame(canvas) {
     // Handle ice patch creation
     if (collResult.newIcePatch) {
       icePatches.push(collResult.newIcePatch);
+    }
+
+    // Handle reverse spin trigger (toggle if already active)
+    if (collResult.triggerReverseSpin) {
+      if (reverseSpinTimer > 0) {
+        // Already antispinning - hitting another orange enemy cancels it
+        reverseSpinTimer = 0;
+        ship.angularVel = ANGULAR_VEL; // Restore normal spin immediately
+      } else {
+        // Not antispinning - start the effect
+        reverseSpinTimer = 12.0; // 12 seconds of reverse spin
+      }
     }
 
     // Update ice patches (expansion and lifetime)
@@ -1026,21 +1088,27 @@ export function createGame(canvas) {
       // Lock ship velocity to frozen velocity
       ship.vx = frozenVelocity.vx;
       ship.vy = frozenVelocity.vy;
-      // Prevent rotation
-      ship.angularVel = 0;
+      // Prevent rotation (unless reverse spin is active)
+      if (reverseSpinTimer <= 0) {
+        ship.angularVel = 0;
+      }
       // Force ship to stay in rotating state (not thrusting)
       if (ship.state === "thrusting") {
         ship.state = "rotating";
       }
     } else if (wasShipFrozen && !shipFrozen) {
-      // Just exited ice - restore normal angular velocity
-      ship.angularVel = ANGULAR_VEL;
+      // Just exited ice - restore angular velocity (normal or reversed)
+      ship.angularVel = reverseSpinTimer > 0 ? -ANGULAR_VEL : ANGULAR_VEL;
     }
 
-    // Check maze collision (only in maze levels)
+    // Check maze collision and apply attractor wall forces (only in maze levels)
     const currentLevel = levels[levelIndex] || levels[0];
-    if (currentLevel.type === 'maze' && ship.alive && invulnTimer <= 0) {
-      if (checkMazeCollision(ship, W, H)) {
+    if (currentLevel.type === 'maze' && ship.alive) {
+      // Apply attractor wall forces
+      applyAttractorWallForce(ship, dt, W, H);
+
+      // Check wall collision for damage
+      if (invulnTimer <= 0 && checkMazeCollision(ship, W, H)) {
         // Apply same damage as hitting a red hazard
         energy -= ENEMY_DAMAGE;
         hitFlashColor = 'rgba(255,60,60,';
@@ -1110,7 +1178,7 @@ export function createGame(canvas) {
 
     // Maze walls (render behind bodies)
     if (!hideGameElements) {
-      renderMaze(ctx, W, H, phase);
+      renderMaze(ctx, W, H, phase, ship);
     }
 
     // Ice patches (render behind bodies but on top of maze/background)
@@ -1188,6 +1256,22 @@ export function createGame(canvas) {
         ctx.fillRect(-crossW / 2, -crossT / 2, crossW, crossT);
 
         ctx.restore();
+      } else if (b.type === 'extralife') {
+        // Small ship icon (same shape as lives display)
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.rotate(-Math.PI / 4);
+
+        ctx.beginPath();
+        ctx.moveTo(renderRadius, 0);
+        ctx.lineTo(-renderRadius * 0.7, renderRadius * 0.6);
+        ctx.lineTo(-renderRadius * 0.4, 0);
+        ctx.lineTo(-renderRadius * 0.7, -renderRadius * 0.6);
+        ctx.closePath();
+        ctx.fillStyle = '#cfe8ff';
+        ctx.fill();
+
+        ctx.restore();
       } else if (b.type === 'ice_star' || b.type === 'ice_patch_expanding') {
         // Light blue ice star
         ctx.beginPath();
@@ -1202,6 +1286,48 @@ export function createGame(canvas) {
           ctx.fillStyle = '#ffffff';
           ctx.fill();
         }
+      } else if (b.type === 'hazard_reverse') {
+        // Orange reverse-spin hazard with rotating symbol
+        ctx.save();
+        ctx.translate(b.x, b.y);
+
+        // Draw orange circle
+        ctx.beginPath();
+        ctx.arc(0, 0, renderRadius, 0, TWO_PI);
+        ctx.fillStyle = '#ff8c3c'; // Off-red/orange color
+        ctx.fill();
+
+        // Draw rotating arrows symbol (2 curved arrows forming a circle)
+        const time = performance.now() / 1000; // Use time for rotation
+        const rotationAngle = time * 3; // Rotate at 3 radians per second
+        ctx.rotate(rotationAngle);
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = renderRadius * 0.15;
+        ctx.lineCap = 'round';
+
+        // Draw two curved arrows
+        for (let i = 0; i < 2; i++) {
+          ctx.save();
+          ctx.rotate((i * Math.PI));
+
+          // Curved arrow path
+          ctx.beginPath();
+          ctx.arc(0, 0, renderRadius * 0.5, -Math.PI * 0.3, Math.PI * 0.3, false);
+          ctx.stroke();
+
+          // Arrowhead
+          const arrowSize = renderRadius * 0.25;
+          ctx.beginPath();
+          ctx.moveTo(renderRadius * 0.4, renderRadius * 0.3);
+          ctx.lineTo(renderRadius * 0.4 + arrowSize, renderRadius * 0.3 - arrowSize * 0.5);
+          ctx.lineTo(renderRadius * 0.4 + arrowSize * 0.5, renderRadius * 0.3 + arrowSize * 0.5);
+          ctx.stroke();
+
+          ctx.restore();
+        }
+
+        ctx.restore();
       } else {
         ctx.beginPath();
         ctx.arc(b.x, b.y, renderRadius, 0, TWO_PI);
@@ -1231,7 +1357,21 @@ export function createGame(canvas) {
       ctx.lineTo(-SHIP_RADIUS * 0.4, 0);
       ctx.lineTo(-SHIP_RADIUS * 0.7, -SHIP_RADIUS * 0.6);
       ctx.closePath();
-      ctx.fillStyle = '#cfe8ff';
+
+      // Apply orange tint when antispinning
+      let shipColor = '#cfe8ff'; // Normal color
+      if (reverseSpinTimer > 0) {
+        if (reverseSpinTimer <= 3.0) {
+          // Flash orange/normal at 2 flashes/sec for last 3 seconds
+          const flashFreq = 2.0; // 2 Hz
+          const flashPhase = (performance.now() * 0.001 * flashFreq) % 1.0;
+          shipColor = flashPhase < 0.5 ? '#ffcc99' : '#cfe8ff'; // Orange tint / Normal
+        } else {
+          // Solid orange tint
+          shipColor = '#ffcc99';
+        }
+      }
+      ctx.fillStyle = shipColor;
       ctx.fill();
 
       if (ship.state === "thrusting") {
@@ -1378,6 +1518,26 @@ export function createGame(canvas) {
       ctx.restore();
     }
 
+    // Reverse spin timer (bottom-right corner) - during gameplay when effect is active
+    if (reverseSpinTimer > 0 && phase === 'playing') {
+      const timerText = reverseSpinTimer.toFixed(1) + 's';
+      ctx.save();
+
+      // Orange color to match the reverse-spin hazard
+      const timerColor = '#ff8c3c';
+
+      ctx.fillStyle = timerColor;
+      ctx.font = 'bold 20px monospace';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+
+      // Position: if maze timer is also showing, place it above the maze timer
+      const yOffset = (currentLevelCfg.type === 'maze') ? -30 : 0;
+      ctx.fillText(timerText, w - 12, h - 12 + yOffset);
+
+      ctx.restore();
+    }
+
     // Hit flash when taking damage (red for hazard, green for elite)
     if (hitFlashTimer > 0) {
       // Wall bumps (0.05s) get reduced opacity; enemy hits (0.1s) get full
@@ -1443,8 +1603,10 @@ export function createGame(canvas) {
         'Collect yellow stars to build up warp drive.',
         'Red & green pulsars drain your energy.',
         'Use gravity to slingshot them off-screen.',
-        'This greatly increases your warp drive.',
+        'Blue ice starts cause temprary ice slicks.',
         ' ',
+        'In maze levels, avoid walls & find the exit',
+        'Attractor walls pull you toward them!',
         ' ',
         'Once you\'ve built up enough warp drive',
         'enter the vortex to finish the level...'
